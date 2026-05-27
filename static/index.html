@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NSDD Site Simulator</title>
+    <link rel="stylesheet" href="style.css?v=20260508b">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>NSDD Site Simulator</h1>
+                <p style="color: var(--text-secondary)">Camera &amp; Radiation Portal Monitor Simulator</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-primary" onclick="openCameraModal()">
+                    <span>+</span> Add Camera
+                </button>
+                <button class="btn btn-rpm" onclick="openRPMModal()">
+                    <span>+</span> Add RPM
+                </button>
+                <button class="btn" style="background:rgba(255,255,255,0.06);color:var(--text-secondary)" onclick="openVideoLibrary()">
+                    📁 Videos
+                </button>
+                <button class="btn" style="background:rgba(255,255,255,0.06);color:var(--text-secondary)" onclick="exportCSV()" title="Export site config CSV">
+                    ⬇ Export CSV
+                </button>
+            </div>
+        </header>
+
+        <!-- Toolbar: status summary + filter chips -->
+        <div class="toolbar">
+            <div class="status-summary">
+                <span class="summary-chip"><span class="dot dot-cam"></span><b id="sum-cams">0</b>&nbsp;cameras</span>
+                <span class="summary-chip"><span class="dot dot-rpm"></span><b id="sum-rpms">0</b>&nbsp;RPMs</span>
+                <span class="summary-chip summary-running"><span class="dot dot-live"></span><b id="sum-running">0</b>&nbsp;running</span>
+            </div>
+            <div class="filter-chips" role="tablist" id="filter-chips">
+                <button class="chip active" data-filter="all">All</button>
+                <button class="chip" data-filter="camera">📷 Cameras</button>
+                <button class="chip" data-filter="rpm">☢ RPMs</button>
+                <button class="chip" data-filter="running">● Running</button>
+            </div>
+        </div>
+
+        <!-- Two-column layout: RPMs on the left, cameras on the right -->
+        <div class="device-layout" id="device-layout">
+            <section class="device-column">
+                <h2 class="column-title"><span class="dot dot-rpm"></span>RPM Monitors</h2>
+                <div class="column-cards" id="rpm-column"></div>
+                <div class="empty-state" id="empty-rpms">
+                    <p>No RPM monitors. Use <b>+ Add RPM</b> to begin.</p>
+                </div>
+            </section>
+            <section class="device-column">
+                <h2 class="column-title"><span class="dot dot-cam"></span>Cameras</h2>
+                <div class="column-cards" id="camera-column"></div>
+                <div class="empty-state" id="empty-cameras">
+                    <p>No cameras. Use <b>+ Add Camera</b> to begin.</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Camera Modal -->
+    <div class="modal-overlay" id="camera-modal-overlay">
+        <div class="modal" id="camera-modal">
+            <h2>Add Camera Stream</h2>
+            <p class="modal-subtitle">Configure a virtual IP camera (RTSP).</p>
+
+            <form id="camera-form">
+                <div class="form-group">
+                    <label>Camera Name</label>
+                    <input type="text" id="cam-name" placeholder="e.g. Lane 1 Exit" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Video File</label>
+                    <select id="cam-video_file" required>
+                        <option value="">Select a video file...</option>
+                    </select>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>RTSP Port</label>
+                        <input type="number" id="cam-port" value="9001" min="1024" max="65535">
+                    </div>
+                    <div class="form-group">
+                        <label>Stream Path</label>
+                        <input type="text" id="cam-path" placeholder="e.g. cam1" required>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Resolution (optional)</label>
+                        <select id="cam-resolution">
+                            <option value="">Original</option>
+                            <option value="1920x1080">1080p</option>
+                            <option value="1280x720">720p</option>
+                            <option value="640x480">480p</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Framerate (optional)</label>
+                        <select id="cam-framerate">
+                            <option value="">Original</option>
+                            <option value="30">30 FPS</option>
+                            <option value="15">15 FPS</option>
+                            <option value="10">10 FPS</option>
+                            <option value="5">5 FPS</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Start Stream</button>
+                    <button type="button" class="btn btn-danger" onclick="closeCameraModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- RPM Modal -->
+    <div class="modal-overlay" id="rpm-modal-overlay">
+        <div class="modal rpm-modal" id="rpm-modal">
+            <h2>Add RPM Monitor</h2>
+            <p class="modal-subtitle">Configure a Rapiscan VM250 radiation portal monitor (TCP).</p>
+
+            <form id="rpm-form">
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>RPM Name</label>
+                        <input type="text" id="rpm-name" placeholder="e.g. Lane 1 Entry" required>
+                    </div>
+                    <div class="form-group">
+                        <label>TCP Port</label>
+                        <input type="number" id="rpm-port" value="10001" min="1024" max="65535" required>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Unique ID</label>
+                        <input type="text" id="rpm-unique_id" placeholder="e.g. NSDD1">
+                    </div>
+                    <div class="form-group">
+                        <label>Lane Width (m)</label>
+                        <input type="number" id="rpm-lane_width" value="4.7" step="0.1" min="0">
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Latitude</label>
+                        <input type="number" id="rpm-latitude" step="any" placeholder="e.g. 38.867822">
+                    </div>
+                    <div class="form-group">
+                        <label>Longitude</label>
+                        <input type="number" id="rpm-longitude" step="any" placeholder="e.g. -77.066659">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>EML</label>
+                    <div class="checkbox-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="rpm-eml_enabled"> Enabled
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="rpm-eml_collimated"> Collimated
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Associated Cameras</label>
+                    <div class="camera-checklist" id="rpm-cameras-list">
+                        <div class="checklist-empty">No cameras configured yet.</div>
+                    </div>
+                </div>
+
+                <details class="advanced">
+                    <summary>Advanced Settings</summary>
+                    <div class="advanced-body">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Gamma Background (cps)</label>
+                                <input type="number" id="rpm-nominal_gamma_bg" value="120" step="1" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Neutron Background (cps)</label>
+                                <input type="number" id="rpm-nominal_neutron_bg" value="2" step="0.1" min="0">
+                            </div>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Gamma Alarm σ threshold</label>
+                                <input type="number" id="rpm-gamma_n_sigma" value="4.0" step="0.5" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Neutron Alarm σ threshold</label>
+                                <input type="number" id="rpm-neutron_n_sigma" value="7.0" step="0.5" min="1">
+                            </div>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Occupancy Frequency (0–1)</label>
+                                <input type="number" id="rpm-occupancy_frequency" value="0.1" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Occupancy Duration (s)</label>
+                                <input type="text" id="rpm-occupancy_duration_range" value="6,10" placeholder="min,max">
+                            </div>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Gamma Alarm Probability</label>
+                                <input type="number" id="rpm-gamma_alarm_probability" value="0.05" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Neutron Alarm Probability</label>
+                                <input type="number" id="rpm-neutron_alarm_probability" value="0.01" step="0.01" min="0" max="1">
+                            </div>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Unique Alarm Probability</label>
+                                <input type="number" id="rpm-unique_alarm_probability" value="0.0" step="0.01" min="0" max="1">
+                            </div>
+                            <div class="form-group">
+                                <!-- spacer -->
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-rpm">Start RPM</button>
+                    <button type="button" class="btn btn-danger" onclick="closeRPMModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Video Library Modal -->
+    <div class="modal-overlay" id="video-modal-overlay">
+        <div class="modal" id="video-modal">
+            <h2>Video Library</h2>
+            <p class="modal-subtitle">Upload and manage source video files.</p>
+
+            <!-- Upload zone -->
+            <div class="upload-zone" id="upload-zone"
+                 onclick="document.getElementById('video-file-input').click()"
+                 ondragover="handleDragOver(event)"
+                 ondragleave="handleDragLeave(event)"
+                 ondrop="handleDrop(event)">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p>Click to upload or drag &amp; drop</p>
+                <p class="upload-hint">MP4, MKV, AVI supported</p>
+            </div>
+            <input type="file" id="video-file-input" accept=".mp4,.mkv,.avi" style="display:none" onchange="handleFileSelect(event)">
+
+            <!-- Progress bar -->
+            <div class="upload-progress-wrap" id="upload-progress-wrap">
+                <div class="upload-progress-label">
+                    <span id="upload-progress-name"></span>
+                    <span id="upload-progress-pct">0%</span>
+                </div>
+                <div class="upload-progress-bar">
+                    <div class="upload-progress-bar-inner" id="upload-progress-bar-inner"></div>
+                </div>
+            </div>
+
+            <!-- File list -->
+            <div class="file-list" id="video-file-list"></div>
+
+            <div class="form-actions" style="margin-top:1.5rem">
+                <button type="button" class="btn btn-danger" onclick="closeVideoLibrary()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=20260508b"></script>
+</body>
+</html>
