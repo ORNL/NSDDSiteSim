@@ -18,6 +18,10 @@ LOG_DIR = BASE_DIR / "logs"
 
 MEDIAMTX_PATH = BIN_DIR / "mediamtx"
 
+# Keyframe interval (seconds) for transcoded streams. Downstream HLS
+# repackagers can only cut segments on keyframes, so keep GOPs ~1 s.
+KEYFRAME_INTERVAL_SEC = 1
+
 
 class CameraManager:
     def __init__(self):
@@ -73,8 +77,12 @@ class CameraManager:
                 cmd.extend(["-vf", ",".join(v_filters)])
             cmd.extend([
                 "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-                "-c:a", "aac", "-f", "rtsp"
+                "-sc_threshold", "0",
+                "-force_key_frames", f"expr:gte(t,n_forced*{KEYFRAME_INTERVAL_SEC})",
             ])
+            if framerate:
+                cmd.extend(["-g", str(int(framerate) * KEYFRAME_INTERVAL_SEC)])
+            cmd.extend(["-c:a", "aac", "-f", "rtsp"])
         else:
             cmd.extend(["-c", "copy", "-f", "rtsp"])
 
