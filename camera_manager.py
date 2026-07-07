@@ -65,7 +65,8 @@ class CameraManager:
         video_path = VIDEO_DIR / video_file
         rtsp_url = f"rtsp://127.0.0.1:{port}/{path}"
 
-        cmd = ["ffmpeg", "-re", "-stream_loop", "-1", "-i", str(video_path)]
+        # -nostats: the progress ticker writes ~17 MB/day per stream to the log
+        cmd = ["ffmpeg", "-nostats", "-re", "-stream_loop", "-1", "-i", str(video_path)]
 
         if resolution or framerate:
             v_filters = []
