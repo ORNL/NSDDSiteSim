@@ -14,6 +14,9 @@ ENV/
 dist/
 build/
 
+# Runtime state (device configs written by the app)
+data/
+
 # Environment variables
 .env
 .env.local

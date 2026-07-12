@@ -3,6 +3,8 @@
     --secondary-color: #3a7bd5;
     --rpm-primary: #f59e0b;
     --rpm-secondary: #d97706;
+    --mobile-primary: #a855f7;
+    --mobile-secondary: #7c3aed;
     --bg-dark: #0f172a;
     --card-bg: rgba(30, 41, 59, 0.7);
     --text-primary: #f8fafc;
@@ -27,7 +29,7 @@ body {
 }
 
 .container {
-    max-width: 1200px;
+    max-width: 1640px;
     margin: 0 auto;
 }
 
@@ -90,6 +92,17 @@ h1 {
     box-shadow: 0 8px 25px rgba(245, 158, 11, 0.5);
 }
 
+.btn-mobile {
+    background: linear-gradient(135deg, var(--mobile-primary), var(--mobile-secondary));
+    color: white;
+    box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
+}
+
+.btn-mobile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(168, 85, 247, 0.5);
+}
+
 .btn-danger {
     background: rgba(239, 68, 68, 0.1);
     color: var(--danger);
@@ -144,8 +157,9 @@ h1 {
     flex-shrink: 0;
 }
 
-.dot-cam   { background: var(--primary-color); box-shadow: 0 0 6px rgba(0, 210, 255, 0.5); }
-.dot-rpm   { background: var(--rpm-primary);   box-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
+.dot-cam    { background: var(--primary-color);  box-shadow: 0 0 6px rgba(0, 210, 255, 0.5); }
+.dot-rpm    { background: var(--rpm-primary);    box-shadow: 0 0 6px rgba(245, 158, 11, 0.5); }
+.dot-mobile { background: var(--mobile-primary); box-shadow: 0 0 6px rgba(168, 85, 247, 0.5); }
 .dot-live  { background: var(--accent);        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6); animation: livePulse 1.8s ease-out infinite; }
 
 @keyframes livePulse {
@@ -223,8 +237,15 @@ h1 {
     display: none;
 }
 
+/* Three columns down to 1200px, then 2-up wrap, then a single stack. */
+@media (max-width: 1200px) {
+    .device-layout { flex-wrap: wrap; }
+    .device-column { flex: 1 1 calc(50% - 0.75rem); }
+}
+
 @media (max-width: 800px) {
-    .device-layout { flex-direction: column; }
+    .device-layout { flex-direction: column; flex-wrap: nowrap; }
+    .device-column { flex: 1 1 auto; }
 }
 
 .card {
@@ -253,6 +274,7 @@ h1 {
 
 .card[data-type="camera"]::before { background: var(--primary-color); }
 .card[data-type="rpm"]::before    { background: var(--rpm-primary); }
+.card[data-type="mobile"]::before { background: var(--mobile-primary); }
 
 .card[data-running="true"]::before {
     box-shadow: 0 0 12px currentColor;
@@ -314,7 +336,8 @@ h1 {
     font-weight: 700;
 }
 
-.state-badge.IDLE {
+.state-badge.IDLE,
+.state-badge.WALKING {
     background: rgba(148, 163, 184, 0.15);
     color: var(--text-secondary);
 }
@@ -406,6 +429,10 @@ h1 {
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     transform: scale(0.9);
     transition: transform 0.3s ease;
+    /* Auto margins beat align-items:center: a modal taller than the viewport
+       top-aligns and scrolls within the overlay instead of pushing its header
+       above the reachable scroll area. Shorter modals still center. */
+    margin: auto;
 }
 
 .modal.active {
@@ -450,6 +477,14 @@ input:focus, select:focus {
 
 .rpm-modal input:focus, .rpm-modal select:focus {
     border-color: var(--rpm-primary);
+}
+
+.mobile-modal input:focus, .mobile-modal select:focus {
+    border-color: var(--mobile-primary);
+}
+
+.mobile-modal {
+    max-width: 720px;
 }
 
 .grid-2 {
@@ -887,4 +922,141 @@ details.advanced .advanced-body {
 .btn-icon.btn-fault.active:hover {
     background: var(--danger);
     border-color: var(--danger);
+}
+
+/* ── Mobile detectors ──────────────────────────────────────────────────── */
+
+.type-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    background: rgba(168, 85, 247, 0.12);
+    color: var(--mobile-primary);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.5rem;
+}
+
+.btn-icon.btn-mobile-play {
+    background: rgba(168, 85, 247, 0.15);
+    color: var(--mobile-primary);
+    border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+.btn-icon.btn-mobile-play:hover {
+    background: var(--mobile-primary);
+    color: white;
+    border-color: var(--mobile-primary);
+}
+
+.btn-icon.btn-mobile-edit {
+    background: rgba(168, 85, 247, 0.1);
+    color: var(--mobile-secondary);
+    border: 1px solid rgba(168, 85, 247, 0.15);
+}
+
+.btn-icon.btn-mobile-edit:hover {
+    background: var(--mobile-secondary);
+    color: white;
+    border-color: var(--mobile-secondary);
+}
+
+.btn-icon.btn-trigger-alarm {
+    background: rgba(249, 115, 22, 0.15);
+    color: #f97316;
+    border: 1px solid rgba(249, 115, 22, 0.25);
+    padding: 0.35rem 0.5rem;
+    font-weight: 700;
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+.btn-icon.btn-trigger-alarm:hover {
+    background: #f97316;
+    color: white;
+    border-color: #f97316;
+}
+
+/* Route editor map (inside the mobile modal) */
+#mobile-map {
+    height: 320px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #0f172a;
+    /* Leaflet sets its own z-indexes up to ~1000; keep the map below the
+       modal chrome but above nothing else. */
+    position: relative;
+    z-index: 0;
+}
+
+#mobile-map .map-unavailable {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.route-hint {
+    font-weight: 400;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.route-stats-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--mobile-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.btn-link:hover {
+    color: var(--mobile-secondary);
+}
+
+/* Numbered waypoint markers */
+.wp-icon {
+    background: none;
+    border: none;
+}
+
+.wp-icon .wp-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--mobile-primary);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid rgba(255, 255, 255, 0.85);
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.6);
+    cursor: pointer;
+}
+
+.wp-icon .wp-dot:hover {
+    background: var(--danger);
 }

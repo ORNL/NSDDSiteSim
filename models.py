@@ -1,5 +1,7 @@
-from pydantic import BaseModel
-from typing import List, Optional, Tuple
+import math
+
+from pydantic import BaseModel, field_validator, model_validator
+from typing import List, Literal, Optional, Tuple
 
 
 class CameraConfig(BaseModel):
@@ -55,6 +57,127 @@ class RPMResponse(BaseModel):
     port: int
     running: bool
     config: RPMConfig
+
+
+# Default patrol route: loop connecting the four Arlington site gates
+# (Memorial Ave -> AFM -> Selfridge -> Marshall), from the RS-350/D5 spec.
+DEFAULT_MOBILE_ROUTE: List[Tuple[float, float]] = [
+    (38.88340, -77.06653),
+    (38.87890, -77.06580),
+    (38.87310, -77.06520),
+    (38.86782, -77.06666),
+    (38.86940, -77.07230),
+    (38.87678, -77.07849),
+    (38.88210, -77.07360),
+    (38.88773, -77.06768),
+    (38.88560, -77.06600),
+]
+
+_M_PER_DEG_LAT = 111_320.0
+
+
+class MobileConfig(BaseModel):
+    name: str
+    detector_type: Literal["rs350", "d5"]
+    port: int
+    serial: str = ""  # blank -> manager derives RS350-<id> / D5-<id>
+    speed_mps: float = 1.4
+    route: List[Tuple[float, float]] = DEFAULT_MOBILE_ROUTE
+    background_gamma_cps: float = 1200.0
+    background_neutron_cps: float = 0.4
+    alarm_factor: float = 1.6
+    alarm_interval_s: float = 300.0  # mean seconds between alarm episodes; 0 = manual-only
+    alarm_duration_s: float = 25.0   # seconds above alarm threshold per episode
+    isotope: str = "Cs-137"
+
+    @field_validator("port")
+    @classmethod
+    def _port_range(cls, v):
+        if not (1 <= v <= 65535):
+            raise ValueError("port must be 1-65535")
+        return v
+
+    @field_validator("speed_mps")
+    @classmethod
+    def _speed_positive(cls, v):
+        if v <= 0:
+            raise ValueError("speed_mps must be > 0")
+        return v
+
+    @field_validator("alarm_factor")
+    @classmethod
+    def _factor_gt_one(cls, v):
+        if v <= 1.0:
+            raise ValueError("alarm_factor must be > 1.0")
+        return v
+
+    @field_validator("background_gamma_cps")
+    @classmethod
+    def _bg_positive(cls, v):
+        if v <= 0:
+            raise ValueError("background_gamma_cps must be > 0")
+        return v
+
+    @field_validator("background_neutron_cps")
+    @classmethod
+    def _bg_n_nonneg(cls, v):
+        if v < 0:
+            raise ValueError("background_neutron_cps must be >= 0")
+        return v
+
+    @field_validator("alarm_duration_s")
+    @classmethod
+    def _duration_min(cls, v):
+        if v < 3:
+            raise ValueError("alarm_duration_s must be >= 3")
+        return v
+
+    @field_validator("alarm_interval_s")
+    @classmethod
+    def _interval_nonneg(cls, v):
+        if v < 0:
+            raise ValueError("alarm_interval_s must be >= 0 (0 disables scheduled alarms)")
+        return v
+
+    @model_validator(mode="after")
+    def _route_sane(self):
+        if len(self.route) < 2:
+            raise ValueError("route needs at least 2 waypoints")
+        for lat, lon in self.route:
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError(f"waypoint out of range: {lat}, {lon}")
+        total = 0.0
+        pts = self.route
+        for i in range(len(pts)):
+            a, b = pts[i], pts[(i + 1) % len(pts)]
+            dy = (b[0] - a[0]) * _M_PER_DEG_LAT
+            dx = (b[1] - a[1]) * _M_PER_DEG_LAT * math.cos(math.radians(a[0]))
+            total += math.hypot(dx, dy)
+        if total <= 10.0:
+            raise ValueError("route loop is shorter than 10 m — spread the waypoints out")
+        return self
+
+
+class MobileResponse(BaseModel):
+    id: str
+    name: str
+    port: int
+    detector_type: str
+    running: bool
+    config: MobileConfig
+
+
+class MobileStatus(BaseModel):
+    id: str
+    detector_type: str
+    connected_clients: int
+    latitude: float
+    longitude: float
+    alarming: bool
+    isotope: str
+    alarm_count: int
+    battery_pct: float
+    gamma_cps: int
 
 
 class RPMStatus(BaseModel):

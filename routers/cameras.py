@@ -85,8 +85,9 @@ def get_cameras(request: Request):
 async def create_camera(config: CameraConfig, request: Request):
     manager = _get_manager(request)
     rpm_manager = request.app.state.rpm_manager
+    mobile_manager = request.app.state.mobile_manager
 
-    used = manager.get_used_ports() | rpm_manager.get_used_ports()
+    used = manager.get_used_ports() | rpm_manager.get_used_ports() | mobile_manager.get_used_ports()
     if config.port in used:
         raise HTTPException(status_code=409, detail=f"Port {config.port} is already in use")
 
@@ -124,6 +125,7 @@ async def start_camera(stream_id: str, request: Request):
 def update_camera(stream_id: str, config: CameraConfig, request: Request):
     manager = _get_manager(request)
     rpm_manager = request.app.state.rpm_manager
+    mobile_manager = request.app.state.mobile_manager
 
     all_status = manager.get_status()
     current = next((s for s in all_status if s["id"] == stream_id), None)
@@ -134,7 +136,8 @@ def update_camera(stream_id: str, config: CameraConfig, request: Request):
 
     # Port conflict check, excluding this stream's own current port
     if config.port != current["config"]["port"]:
-        used = (manager.get_used_ports() - {current["config"]["port"]}) | rpm_manager.get_used_ports()
+        used = (manager.get_used_ports() - {current["config"]["port"]}) | rpm_manager.get_used_ports() \
+            | mobile_manager.get_used_ports()
         if config.port in used:
             raise HTTPException(status_code=409, detail=f"Port {config.port} is already in use")
 

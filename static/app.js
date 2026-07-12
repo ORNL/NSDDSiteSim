@@ -1,10 +1,27 @@
 const state = {
     cameras: [],
     rpms: [],
+    mobiles: [],
     rpmStatuses: {},
+    mobileStatuses: {},
     files: [],
+    isotopes: [],
     filter: 'all'
 };
+
+// Default patrol route: the four-gate Arlington loop from the RS-350/D5 spec.
+// The D5 walks it reversed so two walkers on defaults separate visually.
+const DEFAULT_MOBILE_ROUTE = [
+    [38.88340, -77.06653],
+    [38.87890, -77.06580],
+    [38.87310, -77.06520],
+    [38.86782, -77.06666],
+    [38.86940, -77.07230],
+    [38.87678, -77.07849],
+    [38.88210, -77.07360],
+    [38.88773, -77.06768],
+    [38.88560, -77.06600],
+];
 
 // Keyed cache of `${type}-${id}` -> card HTMLElement. Persisting these across
 // polls is what eliminates the flicker the old innerHTML-replace approach had.
@@ -18,6 +35,7 @@ const DEVICE_HOST = '192.0.2.94';
 let editingCameraId = null;
 let editingRPMId = null;
 let editingRPMConfig = null;
+let editingMobileId = null;
 
 // ── Data fetching ────────────────────────────────────────────────────────────
 
@@ -67,12 +85,48 @@ async function fetchRPMStatuses() {
     renderDevices();
 }
 
+async function fetchMobiles() {
+    try {
+        const res = await fetch('/api/mobiles');
+        state.mobiles = await res.json();
+        renderDevices();
+    } catch (e) {
+        console.error('Failed to fetch mobile detectors', e);
+    }
+}
+
+async function fetchMobileStatuses() {
+    for (const mob of state.mobiles) {
+        if (!mob.running) continue;
+        try {
+            const res = await fetch(`/api/mobiles/${mob.id}/status`);
+            if (res.ok) {
+                state.mobileStatuses[mob.id] = await res.json();
+            }
+        } catch (e) {
+            // non-critical, status display will just be stale
+        }
+    }
+    renderDevices();
+}
+
+async function fetchIsotopes() {
+    try {
+        const res = await fetch('/api/mobiles/isotopes');
+        const data = await res.json();
+        state.isotopes = data.isotopes;
+    } catch (e) {
+        console.error('Failed to fetch isotope list', e);
+    }
+}
+
 // ── Unified renderer ─────────────────────────────────────────────────────────
 
 function passesFilter(item) {
     switch (state.filter) {
         case 'camera':  return item.type === 'camera';
         case 'rpm':     return item.type === 'rpm';
+        case 'mobile':  return item.type === 'mobile';
         case 'running': return item.data.running;
         default:        return true;
     }
@@ -87,23 +141,33 @@ function buildItems() {
             data: r,
             status: state.rpmStatuses[r.id] || null,
         })),
+        ...state.mobiles.map(m => ({
+            type: 'mobile',
+            id: m.id,
+            data: m,
+            status: state.mobileStatuses[m.id] || null,
+        })),
     ];
 }
 
 function renderDevices() {
     const rpmCol = document.getElementById('rpm-column');
+    const mobileCol = document.getElementById('mobile-column');
     const camCol = document.getElementById('camera-column');
     const all = buildItems();
     const items = all.filter(passesFilter);
 
     const rpmItems = items.filter(i => i.type === 'rpm');
+    const mobileItems = items.filter(i => i.type === 'mobile');
     const camItems = items.filter(i => i.type === 'camera');
 
     document.getElementById('empty-rpms').style.display = rpmItems.length ? 'none' : '';
+    document.getElementById('empty-mobiles').style.display = mobileItems.length ? 'none' : '';
     document.getElementById('empty-cameras').style.display = camItems.length ? 'none' : '';
 
     const seen = new Set();
     renderColumn(rpmCol, rpmItems, seen);
+    renderColumn(mobileCol, mobileItems, seen);
     renderColumn(camCol, camItems, seen);
 
     // Drop cards for devices that no longer exist (or were filtered out).
@@ -141,9 +205,11 @@ function renderColumn(host, items, seen) {
 function updateSummary(all) {
     const cams = all.filter(i => i.type === 'camera').length;
     const rpms = all.filter(i => i.type === 'rpm').length;
+    const mobiles = all.filter(i => i.type === 'mobile').length;
     const running = all.filter(i => i.data.running).length;
     document.getElementById('sum-cams').textContent = cams;
     document.getElementById('sum-rpms').textContent = rpms;
+    document.getElementById('sum-mobiles').textContent = mobiles;
     document.getElementById('sum-running').textContent = running;
 }
 
@@ -174,7 +240,7 @@ function createCardElement(item) {
             <div class="url-box" data-field="url"></div>
             <p class="url-hint">Click to copy RTSP URL</p>
         `;
-    } else {
+    } else if (item.type === 'rpm') {
         card.innerHTML = `
             <div class="card-header">
                 <div class="stream-info">
@@ -191,6 +257,30 @@ function createCardElement(item) {
                 <div>Connected Clients: <span class="val" data-field="clients"></span></div>
                 <div>Occupancy Count: <span class="val" data-field="occ"></span></div>
                 <div class="card-cameras" data-field="cameras"></div>
+            </div>
+            <div class="url-box" data-field="url"></div>
+            <p class="url-hint">Click to copy TCP address</p>
+        `;
+    } else {
+        card.innerHTML = `
+            <div class="card-header">
+                <div class="stream-info">
+                    <span class="status-chip" data-field="status-chip">
+                        <span class="status-dot"></span><span data-field="status-label">Stopped</span>
+                    </span>
+                    <h3 data-field="name"></h3>
+                    <span class="type-badge" data-field="type-badge"></span>
+                </div>
+                <div class="card-actions" data-field="actions"></div>
+            </div>
+            <div class="stream-details">
+                <div>Port: <span class="val" data-field="port"></span></div>
+                <div>State: <span class="state-badge" data-field="state-badge"></span></div>
+                <div>Position: <span class="val" data-field="position"></span></div>
+                <div>Connected Clients: <span class="val" data-field="clients"></span></div>
+                <div>Alarm Episodes: <span class="val" data-field="alarms"></span></div>
+                <div>Battery: <span class="val" data-field="battery"></span></div>
+                <div>Profile: <span class="val" data-field="profile"></span></div>
             </div>
             <div class="url-box" data-field="url"></div>
             <p class="url-hint">Click to copy TCP address</p>
@@ -242,7 +332,7 @@ function updateCardElement(el, item) {
             !running ? { action: 'edit', cls: 'btn-edit', title: 'Edit settings', svg: editIcon() } : null,
             { action: 'delete', cls: '', title: 'Delete', svg: trashIcon() },
         ]);
-    } else {
+    } else if (item.type === 'rpm') {
         const cfg = item.data.config || {};
         const status = item.status;
         const port = item.data.port ?? cfg.port ?? '';
@@ -317,6 +407,52 @@ function updateCardElement(el, item) {
             { action: 'edit',   cls: 'btn-edit btn-rpm-edit', title: 'Edit settings', svg: editIcon() },
             { action: 'delete', cls: '',                      title: 'Delete',        svg: trashIcon() },
         ]);
+    } else {
+        const cfg = item.data.config || {};
+        // Ignore a cached status once the detector is stopped — otherwise the
+        // card keeps showing the walker's last position as if it were live.
+        const status = item.data.running ? item.status : null;
+        const port = item.data.port ?? cfg.port ?? '';
+        const tcpAddr = `tcp://${DEVICE_HOST}:${port}`;
+        const typeLabel = (item.data.detector_type || cfg.detector_type) === 'd5'
+            ? 'Kromek D5' : 'RS-350';
+
+        setText(el, 'type-badge', typeLabel);
+        setText(el, 'port', port);
+        setText(el, 'clients', status ? status.connected_clients : '—');
+        setText(el, 'alarms', status ? status.alarm_count : '—');
+        setText(el, 'battery', status ? `${status.battery_pct.toFixed(0)}%` : '—');
+        setText(el, 'position', status
+            ? `${status.latitude.toFixed(5)}, ${status.longitude.toFixed(5)}`
+            : '—');
+
+        const intervalMin = (cfg.alarm_interval_s || 0) / 60;
+        const intervalText = intervalMin > 0 ? `alarm ~${intervalMin} min` : 'manual alarms';
+        setText(el, 'profile', `${cfg.speed_mps} m/s · ${cfg.isotope} · ${intervalText}`);
+
+        const alarming = !!(status && status.alarming);
+        const stateBadge = el.querySelector('[data-field="state-badge"]');
+        const stateText = !status ? '—'
+            : alarming ? `ALARM · ${status.isotope}` : 'WALKING';
+        const stateClass = alarming ? 'ALARM' : 'WALKING';
+        if (stateBadge.textContent !== stateText) stateBadge.textContent = stateText;
+        if (stateBadge.className !== `state-badge ${stateClass}`) {
+            stateBadge.className = `state-badge ${stateClass}`;
+        }
+
+        const urlBox = el.querySelector('[data-field="url"]');
+        if (urlBox.textContent !== tcpAddr) urlBox.textContent = tcpAddr;
+        urlBox.dataset.copy = tcpAddr;
+
+        renderActions(el, running ? [
+            { action: 'trigger', cls: 'btn-trigger-alarm', title: 'Trigger alarm episode', text: '☢' },
+            { action: 'stop',    cls: 'btn-stop',          title: 'Stop mobile detector',  svg: stopIcon() },
+            { action: 'delete',  cls: '',                  title: 'Delete',                svg: trashIcon() },
+        ] : [
+            { action: 'start',  cls: 'btn-play btn-mobile-play', title: 'Start mobile detector', svg: playIcon() },
+            { action: 'edit',   cls: 'btn-edit btn-mobile-edit', title: 'Edit settings',         svg: editIcon() },
+            { action: 'delete', cls: '',                         title: 'Delete',                svg: trashIcon() },
+        ]);
     }
 }
 
@@ -367,6 +503,14 @@ const rpmActions = {
     nh:      (id, card) => setRPMFault(id, 'nh',     card.dataset.nhFault     !== '1'),
     tamper:  (id, card) => setRPMFault(id, 'tamper', card.dataset.tamperFault !== '1'),
 };
+const mobileActions = {
+    start:   startMobile,
+    stop:    stopMobile,
+    edit:    editMobile,
+    delete:  deleteMobile,
+    trigger: triggerMobileAlarm,
+};
+const actionMaps = { camera: cameraActions, rpm: rpmActions, mobile: mobileActions };
 
 function setupGridDelegation() {
     document.getElementById('device-layout').addEventListener('click', e => {
@@ -377,7 +521,7 @@ function setupGridDelegation() {
         const id = card.dataset.id;
         const type = card.dataset.type;
         const action = btn.dataset.action;
-        const handler = (type === 'camera' ? cameraActions : rpmActions)[action];
+        const handler = (actionMaps[type] || {})[action];
         if (handler) handler(id, card);
     });
 }
@@ -862,6 +1006,357 @@ async function deleteRPM(id) {
     }
 }
 
+// ── Mobile detector modal + Leaflet route editor ─────────────────────────────
+
+let mobileMap = null;          // lazy Leaflet singleton (created on first modal open)
+let routeLatLngs = [];         // [{lat, lng}, ...] working copy for the editor
+let routeMarkers = [];
+let routePolyline = null;
+let routeDirty = false;        // user has touched the route (type switch won't reset it)
+let mobilePortAuto = true;     // port still holds an auto-suggested value
+
+function defaultRouteForType(type) {
+    const r = DEFAULT_MOBILE_ROUTE.map(p => [p[0], p[1]]);
+    return type === 'd5' ? r.reverse() : r;
+}
+
+function ensureMobileMap() {
+    const host = document.getElementById('mobile-map');
+    if (typeof L === 'undefined') {
+        if (!host.querySelector('.map-unavailable')) {
+            host.innerHTML = '<div class="map-unavailable">Map unavailable — the browser could not load ' +
+                'Leaflet from unpkg.com. The route below is kept as-is; other fields still work.</div>';
+        }
+        return false;
+    }
+    if (mobileMap) return true;
+
+    mobileMap = L.map('mobile-map');
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors',
+    });
+    const sat = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Esri World Imagery',
+    });
+    osm.addTo(mobileMap);
+    L.control.layers({ 'Map': osm, 'Satellite': sat }).addTo(mobileMap);
+    mobileMap.on('click', e => {
+        routeLatLngs.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+        routeDirty = true;
+        rebuildRouteLayer();
+    });
+    return true;
+}
+
+function waypointIcon(n) {
+    return L.divIcon({
+        className: 'wp-icon',
+        html: `<div class="wp-dot">${n}</div>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+    });
+}
+
+function rebuildRouteLayer() {
+    updateRouteStats();
+    if (!mobileMap) return;
+    routeMarkers.forEach(m => m.remove());
+    routeMarkers = [];
+    routeLatLngs.forEach((ll, i) => {
+        const m = L.marker([ll.lat, ll.lng], { icon: waypointIcon(i + 1), draggable: true });
+        m.on('drag', e => {
+            const p = e.target.getLatLng();
+            routeLatLngs[i] = { lat: p.lat, lng: p.lng };
+            updateRoutePolyline();
+            updateRouteStats();
+        });
+        m.on('dragend', () => { routeDirty = true; });
+        // Leaflet suppresses click after a drag, so click-to-remove is safe.
+        const remove = () => {
+            routeLatLngs.splice(i, 1);
+            routeDirty = true;
+            rebuildRouteLayer();
+        };
+        m.on('click', remove);
+        m.on('contextmenu', remove);
+        m.addTo(mobileMap);
+        routeMarkers.push(m);
+    });
+    updateRoutePolyline();
+}
+
+function updateRoutePolyline() {
+    if (!mobileMap) return;
+    const pts = routeLatLngs.map(ll => [ll.lat, ll.lng]);
+    const closed = pts.length >= 2 ? pts.concat([pts[0]]) : pts;  // show loop closure
+    if (!routePolyline) {
+        routePolyline = L.polyline(closed, { color: '#a855f7', weight: 3, opacity: 0.9 }).addTo(mobileMap);
+    } else {
+        routePolyline.setLatLngs(closed);
+    }
+}
+
+function routeLengthMeters() {
+    let total = 0;
+    const n = routeLatLngs.length;
+    for (let i = 0; i < n; i++) {
+        const a = routeLatLngs[i], b = routeLatLngs[(i + 1) % n];
+        const dy = (b.lat - a.lat) * 111320;
+        const dx = (b.lng - a.lng) * 111320 * Math.cos(a.lat * Math.PI / 180);
+        total += Math.hypot(dx, dy);
+    }
+    return total;
+}
+
+function updateRouteStats() {
+    const el = document.getElementById('route-stats');
+    const n = routeLatLngs.length;
+    if (n < 2) {
+        el.textContent = `${n} waypoint${n === 1 ? '' : 's'} — add at least 2`;
+        return;
+    }
+    const len = routeLengthMeters();
+    const speed = parseFloat(document.getElementById('mobile-speed_mps').value) || 1.4;
+    const lapS = len / speed;
+    const mm = Math.floor(lapS / 60);
+    const ss = String(Math.round(lapS % 60)).padStart(2, '0');
+    el.textContent = `${n} waypoints · ${(len / 1000).toFixed(2)} km loop · lap ~${mm}:${ss} at ${speed} m/s`;
+}
+
+function loadRouteIntoEditor(route) {
+    routeLatLngs = route.map(p => ({ lat: p[0], lng: p[1] }));
+    rebuildRouteLayer();
+    fitMobileMapToRoute();
+}
+
+function fitMobileMapToRoute() {
+    if (!mobileMap) return;
+    if (routeLatLngs.length >= 2) {
+        mobileMap.fitBounds(L.latLngBounds(routeLatLngs.map(ll => [ll.lat, ll.lng])), { padding: [25, 25] });
+    } else {
+        mobileMap.setView([38.8778, -77.0712], 14);  // Arlington site
+    }
+}
+
+function resetMobileRoute() {
+    routeDirty = false;
+    loadRouteIntoEditor(defaultRouteForType(document.getElementById('mobile-detector_type').value));
+}
+
+function populateIsotopes(selected) {
+    const sel = document.getElementById('mobile-isotope');
+    const names = state.isotopes.map(i => i.name);
+    if (selected && !names.includes(selected)) names.push(selected);
+    sel.innerHTML = names.map(n => `<option value="${escAttr(n)}">${escHtml(n)}</option>`).join('');
+    sel.value = selected || 'Cs-137';
+}
+
+function suggestMobilePort() {
+    const type = document.getElementById('mobile-detector_type').value;
+    const usedPorts = new Set([
+        ...state.cameras.map(c => c.config.port),
+        ...state.rpms.map(r => r.port),
+        ...state.mobiles.map(m => m.port),
+    ]);
+    let suggested = type === 'd5' ? 10111 : 10110;
+    while (usedPorts.has(suggested)) suggested++;
+    document.getElementById('mobile-port').value = suggested;
+    mobilePortAuto = true;
+}
+
+function openMobileModal(mobile = null) {
+    editingMobileId = mobile ? mobile.id : null;
+
+    const modal = document.getElementById('mobile-modal');
+    const title = modal.querySelector('h2');
+    const subtitle = modal.querySelector('.modal-subtitle');
+    const submitBtn = modal.querySelector('[type="submit"]');
+
+    if (mobile) {
+        const cfg = mobile.config;
+        title.textContent = 'Edit Mobile Detector';
+        subtitle.textContent = 'Update settings. Changes take effect when the detector is started.';
+        submitBtn.textContent = 'Save Changes';
+
+        document.getElementById('mobile-name').value = cfg.name;
+        document.getElementById('mobile-detector_type').value = cfg.detector_type;
+        document.getElementById('mobile-port').value = cfg.port;
+        mobilePortAuto = false;
+        document.getElementById('mobile-serial').value = cfg.serial || '';
+        document.getElementById('mobile-speed_mps').value = cfg.speed_mps;
+        document.getElementById('mobile-alarm_interval_min').value = (cfg.alarm_interval_s || 0) / 60;
+        populateIsotopes(cfg.isotope);
+        document.getElementById('mobile-background_gamma_cps').value = cfg.background_gamma_cps;
+        document.getElementById('mobile-background_neutron_cps').value = cfg.background_neutron_cps;
+        document.getElementById('mobile-alarm_factor').value = cfg.alarm_factor;
+        document.getElementById('mobile-alarm_duration_s').value = cfg.alarm_duration_s;
+        routeDirty = true;  // editing an existing route — type switch must not clobber it
+        routeLatLngs = (cfg.route || []).map(p => ({ lat: p[0], lng: p[1] }));
+    } else {
+        title.textContent = 'Add Mobile Detector';
+        subtitle.textContent = 'Configure a walking RS-350 backpack or Kromek D5 RIID (TCP).';
+        submitBtn.textContent = 'Start Mobile Detector';
+
+        document.getElementById('mobile-form').reset();
+        populateIsotopes('Cs-137');
+        suggestMobilePort();
+        routeDirty = false;
+        routeLatLngs = defaultRouteForType('rs350').map(p => ({ lat: p[0], lng: p[1] }));
+    }
+
+    showModal('mobile-modal-overlay', 'mobile-modal');
+
+    // Leaflet inside a display:none container needs a size recalc once the
+    // modal is actually visible; run again after the 300ms open transition.
+    if (ensureMobileMap()) {
+        requestAnimationFrame(() => mobileMap.invalidateSize());
+        setTimeout(() => {
+            mobileMap.invalidateSize();
+            rebuildRouteLayer();
+            fitMobileMapToRoute();
+        }, 350);
+    } else {
+        updateRouteStats();
+    }
+}
+
+function closeMobileModal() {
+    hideModal('mobile-modal-overlay', 'mobile-modal');
+    editingMobileId = null;
+}
+
+document.getElementById('mobile-detector_type').addEventListener('change', () => {
+    const type = document.getElementById('mobile-detector_type').value;
+    if (editingMobileId) return;  // editing: never auto-rewrite fields
+    if (mobilePortAuto) suggestMobilePort();
+    // Swap in the type's default background unless the user changed it.
+    const bgEl = document.getElementById('mobile-background_gamma_cps');
+    if (bgEl.value === '1200' || bgEl.value === '900') {
+        bgEl.value = type === 'd5' ? 900 : 1200;
+    }
+    if (!routeDirty) loadRouteIntoEditor(defaultRouteForType(type));
+});
+
+document.getElementById('mobile-port').addEventListener('input', () => { mobilePortAuto = false; });
+document.getElementById('mobile-speed_mps').addEventListener('input', updateRouteStats);
+
+// If a field inside the collapsed Advanced section fails native validation,
+// the browser blocks submit but can't show the bubble on a hidden input —
+// pop the section open so the failure is visible instead of silent.
+document.getElementById('mobile-form').addEventListener('invalid', () => {
+    document.querySelector('#mobile-modal details.advanced').open = true;
+}, true);
+
+document.getElementById('mobile-form').onsubmit = async (e) => {
+    e.preventDefault();
+    if (routeLatLngs.length < 2) {
+        alert('The patrol route needs at least 2 waypoints — click the map to add them.');
+        return;
+    }
+
+    const config = {
+        name: document.getElementById('mobile-name').value,
+        detector_type: document.getElementById('mobile-detector_type').value,
+        port: parseInt(document.getElementById('mobile-port').value),
+        serial: document.getElementById('mobile-serial').value.trim(),
+        speed_mps: parseFloat(document.getElementById('mobile-speed_mps').value) || 1.4,
+        route: routeLatLngs.map(ll => [ll.lat, ll.lng]),
+        alarm_interval_s: (parseFloat(document.getElementById('mobile-alarm_interval_min').value) || 0) * 60,
+        isotope: document.getElementById('mobile-isotope').value,
+        background_gamma_cps: parseFloat(document.getElementById('mobile-background_gamma_cps').value) || 1200,
+        background_neutron_cps: parseFloat(document.getElementById('mobile-background_neutron_cps').value) || 0,
+        alarm_factor: parseFloat(document.getElementById('mobile-alarm_factor').value) || 1.6,
+        alarm_duration_s: parseFloat(document.getElementById('mobile-alarm_duration_s').value) || 25,
+    };
+
+    const url = editingMobileId ? `/api/mobiles/${editingMobileId}` : '/api/mobiles';
+    const method = editingMobileId ? 'PUT' : 'POST';
+
+    try {
+        const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        if (res.ok) {
+            closeMobileModal();
+            await fetchMobiles();
+        } else {
+            const err = await res.json();
+            alert('Error: ' + formatApiError(err));
+        }
+    } catch (e) {
+        alert('Failed to save mobile detector');
+    }
+};
+
+async function startMobile(id) {
+    try {
+        const res = await fetch(`/api/mobiles/${id}/start`, { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json();
+            alert('Error: ' + formatApiError(err));
+        }
+        await fetchMobiles();
+    } catch (e) {
+        alert('Failed to start mobile detector');
+    }
+}
+
+async function stopMobile(id) {
+    try {
+        const res = await fetch(`/api/mobiles/${id}/stop`, { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json();
+            alert('Error: ' + formatApiError(err));
+        }
+        await fetchMobiles();
+    } catch (e) {
+        alert('Failed to stop mobile detector');
+    }
+}
+
+function editMobile(id) {
+    const mobile = state.mobiles.find(m => m.id === id);
+    if (mobile) openMobileModal(mobile);
+}
+
+async function deleteMobile(id) {
+    if (!confirm('Stop and remove this mobile detector?')) return;
+    try {
+        await fetch(`/api/mobiles/${id}`, { method: 'DELETE' });
+        delete state.mobileStatuses[id];
+        await fetchMobiles();
+    } catch (e) {
+        alert('Failed to remove mobile detector');
+    }
+}
+
+async function triggerMobileAlarm(id) {
+    try {
+        const res = await fetch(`/api/mobiles/${id}/trigger`, { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json();
+            alert('Error: ' + formatApiError(err));
+        }
+    } catch (e) {
+        alert('Failed to trigger alarm episode');
+    }
+}
+
+// FastAPI validation errors (422) arrive as a list of {loc, msg} objects —
+// flatten to something readable instead of [object Object].
+function formatApiError(err) {
+    const d = err && err.detail;
+    if (Array.isArray(d)) {
+        return d.map(x => x.msg || JSON.stringify(x)).join('; ');
+    }
+    return d || 'Request failed';
+}
+
 // ── Modal helpers ────────────────────────────────────────────────────────────
 
 function showModal(overlayId, modalId) {
@@ -887,6 +1382,9 @@ document.getElementById('camera-modal-overlay').addEventListener('click', e => {
 document.getElementById('rpm-modal-overlay').addEventListener('click', e => {
     if (e.target === e.currentTarget) closeRPMModal();
 });
+document.getElementById('mobile-modal-overlay').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeMobileModal();
+});
 
 // ── CSV export ───────────────────────────────────────────────────────────────
 
@@ -895,6 +1393,9 @@ document.getElementById('rpm-modal-overlay').addEventListener('click', e => {
 // Per-camera columns repeat as CameraType{i},CameraHost{i},CameraPath{i},
 // Codec{i},Username{i},Password{i} — the row width is sized to the RPM with
 // the most associated cameras; rows with fewer cameras pad with blanks.
+// Mobile detectors are intentionally excluded: they are not Rapiscan lanes
+// and the loader CSV format has no walker concept (OSCAR configures its
+// RS-350/D5 driver lanes separately).
 function exportCSV() {
     if (!state.rpms.length) {
         alert('No RPMs configured — nothing to export.');
@@ -1031,12 +1532,15 @@ async function init() {
     setupFilterChips();
     setupGridDelegation();
 
-    await Promise.all([fetchCameras(), fetchRPMs(), fetchFiles()]);
+    await Promise.all([fetchCameras(), fetchRPMs(), fetchMobiles(), fetchFiles(), fetchIsotopes()]);
+    await Promise.all([fetchRPMStatuses(), fetchMobileStatuses()]);
 
     setInterval(fetchCameras, 5000);
     setInterval(async () => {
         await fetchRPMs();
         await fetchRPMStatuses();
+        await fetchMobiles();
+        await fetchMobileStatuses();
     }, 3000);
 }
 

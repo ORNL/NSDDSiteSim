@@ -4,17 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NSDD Site Simulator</title>
-    <link rel="stylesheet" href="style.css?v=20260508b">
+    <link rel="stylesheet" href="style.css?v=20260712b">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 </head>
 <body>
     <div class="container">
         <header>
             <div>
                 <h1>NSDD Site Simulator</h1>
-                <p style="color: var(--text-secondary)">Camera &amp; Radiation Portal Monitor Simulator</p>
+                <p style="color: var(--text-secondary)">Camera, RPM &amp; Mobile Detector Simulator</p>
             </div>
             <div class="header-actions">
                 <button class="btn btn-primary" onclick="openCameraModal()">
@@ -22,6 +23,9 @@
                 </button>
                 <button class="btn btn-rpm" onclick="openRPMModal()">
                     <span>+</span> Add RPM
+                </button>
+                <button class="btn btn-mobile" onclick="openMobileModal()">
+                    <span>+</span> Add Mobile
                 </button>
                 <button class="btn" style="background:rgba(255,255,255,0.06);color:var(--text-secondary)" onclick="openVideoLibrary()">
                     📁 Videos
@@ -37,12 +41,14 @@
             <div class="status-summary">
                 <span class="summary-chip"><span class="dot dot-cam"></span><b id="sum-cams">0</b>&nbsp;cameras</span>
                 <span class="summary-chip"><span class="dot dot-rpm"></span><b id="sum-rpms">0</b>&nbsp;RPMs</span>
+                <span class="summary-chip"><span class="dot dot-mobile"></span><b id="sum-mobiles">0</b>&nbsp;mobile</span>
                 <span class="summary-chip summary-running"><span class="dot dot-live"></span><b id="sum-running">0</b>&nbsp;running</span>
             </div>
             <div class="filter-chips" role="tablist" id="filter-chips">
                 <button class="chip active" data-filter="all">All</button>
                 <button class="chip" data-filter="camera">📷 Cameras</button>
                 <button class="chip" data-filter="rpm">☢ RPMs</button>
+                <button class="chip" data-filter="mobile">🚶 Mobile</button>
                 <button class="chip" data-filter="running">● Running</button>
             </div>
         </div>
@@ -54,6 +60,13 @@
                 <div class="column-cards" id="rpm-column"></div>
                 <div class="empty-state" id="empty-rpms">
                     <p>No RPM monitors. Use <b>+ Add RPM</b> to begin.</p>
+                </div>
+            </section>
+            <section class="device-column">
+                <h2 class="column-title"><span class="dot dot-mobile"></span>Mobile Detectors</h2>
+                <div class="column-cards" id="mobile-column"></div>
+                <div class="empty-state" id="empty-mobiles">
+                    <p>No mobile detectors. Use <b>+ Add Mobile</b> to begin.</p>
                 </div>
             </section>
             <section class="device-column">
@@ -252,6 +265,99 @@
         </div>
     </div>
 
+    <!-- Mobile Detector Modal -->
+    <div class="modal-overlay" id="mobile-modal-overlay">
+        <div class="modal mobile-modal" id="mobile-modal">
+            <h2>Add Mobile Detector</h2>
+            <p class="modal-subtitle">Configure a walking RS-350 backpack or Kromek D5 RIID (TCP).</p>
+
+            <form id="mobile-form">
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="mobile-name" placeholder="e.g. Roving Patrol 1" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Detector Type</label>
+                        <select id="mobile-detector_type">
+                            <option value="rs350">RS-350 Backpack</option>
+                            <option value="d5">Kromek D5 RIID</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>TCP Port</label>
+                        <input type="number" id="mobile-port" value="10110" min="1024" max="65535" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Serial (optional)</label>
+                        <input type="text" id="mobile-serial" placeholder="auto-generated">
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Walking Speed (m/s)</label>
+                        <input type="number" id="mobile-speed_mps" value="1.4" step="any" min="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Avg. Time Between Alarms (min)</label>
+                        <input type="number" id="mobile-alarm_interval_min" value="5" step="any" min="0" title="0 = manual triggers only">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Alarm Isotope</label>
+                    <select id="mobile-isotope"></select>
+                </div>
+
+                <div class="form-group">
+                    <label>Patrol Route <span class="route-hint">— click the map to add waypoints, drag to move, click a marker to remove</span></label>
+                    <div id="mobile-map"></div>
+                    <div class="route-stats-row">
+                        <span id="route-stats">0 waypoints</span>
+                        <button type="button" class="btn-link" onclick="resetMobileRoute()">Reset to default route</button>
+                    </div>
+                </div>
+
+                <details class="advanced">
+                    <summary>Advanced Settings</summary>
+                    <div class="advanced-body">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Gamma Background (cps)</label>
+                                <!-- step="any" everywhere: a numeric step with min set uses min as
+                                     the step base, silently failing validation for values like 1200 -->
+                                <input type="number" id="mobile-background_gamma_cps" value="1200" step="any" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label>Neutron Background (cps)</label>
+                                <input type="number" id="mobile-background_neutron_cps" value="0.4" step="any" min="0">
+                            </div>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Alarm Factor (× background)</label>
+                                <input type="number" id="mobile-alarm_factor" value="1.6" step="any" min="1.1">
+                            </div>
+                            <div class="form-group">
+                                <label>Alarm Duration (s)</label>
+                                <input type="number" id="mobile-alarm_duration_s" value="25" step="any" min="3">
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-mobile">Start Mobile Detector</button>
+                    <button type="button" class="btn btn-danger" onclick="closeMobileModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Video Library Modal -->
     <div class="modal-overlay" id="video-modal-overlay">
         <div class="modal" id="video-modal">
@@ -294,6 +400,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=20260508b"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="app.js?v=20260712b"></script>
 </body>
 </html>

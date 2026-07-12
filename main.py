@@ -7,8 +7,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from camera_manager import CameraManager, VIDEO_DIR
+from mobile_manager import MobileManager
 from rpm_manager import RPMManager
-from routers import cameras, rpms
+from routers import cameras, mobiles, rpms
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,9 +31,13 @@ async def lifespan(app: FastAPI):
     # Restore RPM servers (async, runs in this event loop)
     await app.state.rpm_manager.start_all()
 
+    # Restore mobile detector servers (async, runs in this event loop)
+    await app.state.mobile_manager.start_all()
+
     yield
 
     # Shutdown
+    await app.state.mobile_manager.stop_all()
     await app.state.rpm_manager.stop_all()
     app.state.camera_manager.stop_all()
 
@@ -42,9 +47,11 @@ app = FastAPI(title="Lane Simulator", lifespan=lifespan)
 # Attach manager instances to app state before lifespan runs
 app.state.camera_manager = CameraManager()
 app.state.rpm_manager = RPMManager()
+app.state.mobile_manager = MobileManager()
 
 app.include_router(cameras.router)
 app.include_router(rpms.router)
+app.include_router(mobiles.router)
 
 # Serve static UI — must be mounted last so API routes take priority
 app.mount("/", StaticFiles(directory=str(BASE_DIR / "static"), html=True), name="static")
