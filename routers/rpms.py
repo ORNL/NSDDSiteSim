@@ -1,3 +1,4 @@
+import time
 import uuid
 from fastapi import APIRouter, HTTPException, Request, Query
 from typing import List
@@ -15,6 +16,22 @@ def _get_manager(request: Request):
 def get_rpms(request: Request):
     manager = _get_manager(request)
     return manager.get_status()
+
+
+# Declared before the /{rpm_id} routes so "clock" isn't captured as an ID —
+# same ordering constraint as /api/mobiles/isotopes.
+@router.get("/clock")
+def get_clock():
+    """The service's wall clock. Traffic profiles are keyed to this, not to the
+    browser's timezone, so the editor labels its hour axis with it."""
+    lt = time.localtime()
+    return {
+        "timezone": time.strftime("%Z", lt),
+        "utc_offset_hours": -(time.altzone if lt.tm_isdst else time.timezone) / 3600.0,
+        "hour": lt.tm_hour,
+        "minute": lt.tm_min,
+        "wday": lt.tm_wday,  # 0=Mon .. 6=Sun
+    }
 
 
 @router.post("")

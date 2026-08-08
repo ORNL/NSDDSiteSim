@@ -6,6 +6,9 @@ const state = {
     mobileStatuses: {},
     files: [],
     isotopes: [],
+    // The service's wall clock — traffic profiles key off it, not the browser's
+    // timezone, so the schedule editor labels its hour axis with this.
+    serverClock: null,
     filter: 'all'
 };
 
@@ -83,6 +86,15 @@ async function fetchRPMStatuses() {
         }
     }
     renderDevices();
+}
+
+async function fetchServerClock() {
+    try {
+        const res = await fetch('/api/rpms/clock');
+        if (res.ok) state.serverClock = await res.json();
+    } catch (e) {
+        // non-critical — the schedule editor just omits the timezone label
+    }
 }
 
 async function fetchMobiles() {
@@ -256,6 +268,7 @@ function createCardElement(item) {
                 <div>State: <span class="state-badge" data-field="state-badge"></span></div>
                 <div>Connected Clients: <span class="val" data-field="clients"></span></div>
                 <div>Occupancy Count: <span class="val" data-field="occ"></span></div>
+                <div class="card-rate" data-field="rate-row" hidden>Traffic Now: <span class="val" data-field="rate"></span></div>
                 <div class="card-cameras" data-field="cameras"></div>
             </div>
             <div class="url-box" data-field="url"></div>
@@ -350,6 +363,23 @@ function updateCardElement(el, item) {
         setText(el, 'port', port);
         setText(el, 'clients', status ? status.connected_clients : '—');
         setText(el, 'occ', status ? status.occupancy_count : '—');
+
+        // Live traffic rate, shown only when a profile is driving this lane —
+        // it's the quickest confirmation the schedule is actually in force.
+        const schedOn = !!cfg.occupancy_schedule_enabled;
+        const rateRow = el.querySelector('[data-field="rate-row"]');
+        if (rateRow.hidden !== !schedOn) rateRow.hidden = !schedOn;
+        if (schedOn) {
+            if (status) {
+                const pEff = status.occupancy_frequency_effective ?? 0;
+                const dr = cfg.occupancy_duration_range;
+                const meanDur = Array.isArray(dr) ? (dr[0] + dr[1]) / 2 : 8;
+                const mult = cfg.occupancy_frequency ? pEff / cfg.occupancy_frequency : 1;
+                setText(el, 'rate', `${occVehPerHour(pEff, meanDur).toFixed(0)} veh/hr (×${mult.toFixed(2)})`);
+            } else {
+                setText(el, 'rate', '—');
+            }
+        }
 
         // Associated cameras (chips). Names are looked up against state.cameras
         // so a deleted camera silently drops from the row.
@@ -818,6 +848,9 @@ function openRPMModal(rpm = null) {
         document.getElementById('rpm-gamma_alarm_probability').value = cfg.gamma_alarm_probability;
         document.getElementById('rpm-neutron_alarm_probability').value = cfg.neutron_alarm_probability;
         document.getElementById('rpm-unique_alarm_probability').value = cfg.unique_alarm_probability;
+        loadOccupancySchedule(cfg);
+        // Don't let a configured traffic profile hide inside a collapsed section.
+        modal.querySelector('details.advanced').open = !!cfg.occupancy_schedule_enabled;
     } else {
         title.textContent = 'Add RPM Monitor';
         subtitle.textContent = 'Configure a Rapiscan VM250 radiation portal monitor (TCP).';
@@ -840,6 +873,11 @@ function openRPMModal(rpm = null) {
         document.getElementById('rpm-unique_id').value = `NSDD${n}`;
         document.getElementById('rpm-lane_width').value = 4.7;
         renderCameraChecklist([]);
+        // form.reset() clears the checkbox but not occHours/occDays, so without
+        // this an Add straight after an Edit inherits the previous lane's curve.
+        loadOccupancySchedule(null);
+        document.querySelectorAll('#occ-presets .chip').forEach(c => c.classList.remove('active'));
+        modal.querySelector('details.advanced').open = false;
     }
 
     showModal('rpm-modal-overlay', 'rpm-modal');
@@ -890,6 +928,9 @@ document.getElementById('rpm-form').onsubmit = async (e) => {
         neutron_n_sigma: parseFloat(document.getElementById('rpm-neutron_n_sigma').value),
         occupancy_frequency: parseFloat(document.getElementById('rpm-occupancy_frequency').value),
         occupancy_duration_range: duration,
+        occupancy_schedule_enabled: occEnabled(),
+        occupancy_hour_factors: occHours.slice(),
+        occupancy_day_factors: occDays.slice(),
         gamma_alarm_probability: parseFloat(document.getElementById('rpm-gamma_alarm_probability').value),
         neutron_alarm_probability: parseFloat(document.getElementById('rpm-neutron_alarm_probability').value),
         unique_alarm_probability: parseFloat(document.getElementById('rpm-unique_alarm_probability').value),
@@ -926,8 +967,11 @@ document.getElementById('rpm-form').onsubmit = async (e) => {
             document.getElementById('rpm-form').reset();
             await fetchRPMs();
         } else {
+            // The traffic-profile arrays are pydantic-validated, so a 422 here
+            // arrives as a list of error objects — flatten it or it renders as
+            // "[object Object]".
             const err = await res.json();
-            alert('Error: ' + err.detail);
+            alert('Error: ' + formatApiError(err));
         }
     } catch (e) {
         alert('Failed to save RPM');
@@ -1005,6 +1049,272 @@ async function deleteRPM(id) {
         alert('Failed to remove RPM');
     }
 }
+
+// ── RPM traffic profile editor ───────────────────────────────────────────────
+// Working copy + dirty flag, the same shape as the Leaflet route editor below:
+// occHours/occDays are the source of truth while the modal is open, the bar
+// chart and the comma-separated text field are two views onto them, and only
+// the submit handler serialises. form.reset() does NOT clear these — the add
+// branch of openRPMModal must call loadOccupancySchedule(null) explicitly.
+
+const OCC_MAX = 3.0;      // mirrors models.OCC_FACTOR_MAX — keep the two in sync
+const OCC_STEP = 0.1;
+const OCC_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+const OCC_PRESETS = {
+    flat: new Array(24).fill(1),
+    commuter: [0.1, 0.05, 0.05, 0.05, 0.1, 0.3, 0.8, 2.0, 2.5, 1.8, 1.1, 1.0,
+               1.1, 1.0, 1.0, 1.2, 2.0, 2.4, 1.6, 0.9, 0.6, 0.4, 0.25, 0.15],
+    business: [0, 0, 0, 0, 0, 0.1, 0.3, 0.8, 1.4, 1.5, 1.4, 1.3,
+               1.2, 1.3, 1.4, 1.4, 1.2, 0.7, 0.2, 0.05, 0, 0, 0, 0],
+    port: [0.7, 0.6, 0.55, 0.5, 0.55, 0.7, 0.9, 1.2, 1.4, 1.4, 1.3, 1.2,
+           1.2, 1.3, 1.4, 1.4, 1.3, 1.1, 1.0, 0.95, 0.9, 0.85, 0.8, 0.75],
+};
+
+const OCC_PRESET_DAYS = {
+    flat:     [1, 1, 1, 1, 1, 1, 1],
+    commuter: [1, 1, 1, 1, 1, 0.55, 0.35],
+    business: [1, 1, 1, 1, 1, 0.3, 0.1],
+    port:     [1, 1, 1, 1, 1, 0.9, 0.8],
+};
+
+let occHours = new Array(24).fill(1);
+let occDays = new Array(7).fill(1);
+let occPainting = false;
+let occFocusHour = null;   // hovered/painted hour driving the live readout
+let occPreviewDay = 0;     // weekday the stats footer reports on
+
+// The trailing toFixed matters: Math.round(v / 0.1) * 0.1 yields 0.30000000000000004,
+// which would be what lands in rpms.json.
+const occClamp = v => +(Math.round(Math.min(OCC_MAX, Math.max(0, v)) / OCC_STEP) * OCC_STEP).toFixed(2);
+const occEnabled = () => document.getElementById('rpm-occupancy_schedule_enabled').checked;
+const occBaseP = () => parseFloat(document.getElementById('rpm-occupancy_frequency').value) || 0;
+
+function occMeanDuration() {
+    const p = document.getElementById('rpm-occupancy_duration_range')
+        .value.split(',').map(s => parseFloat(s.trim()));
+    const [a, b] = (p.length === 2 && p.every(n => !isNaN(n))) ? p : [6, 10];
+    return (a + b) / 2;
+}
+
+// Raw product before clamping — anything over 1.0 is a silent no-op in the sim.
+const occRawP = (h, wd) => occBaseP() * occHours[h] * occDays[wd];
+const occEffectiveP = (h, wd) => Math.min(1, Math.max(0, occRawP(h, wd)));
+
+// A full arrival cycle is 5/p seconds of idle rolls plus one transit, because
+// the simulator only rolls from IDLE — the transit is dead time. That's why
+// p=1.0 tops out near 277 veh/hr at an 8s mean transit, not 720.
+const occVehPerHour = (p, meanDur) => (p <= 0 ? 0 : 3600 / (5 / p + meanDur));
+
+function buildOccChart() {
+    const host = document.getElementById('occ-hour-chart');
+    if (host.childElementCount) return;
+    // type="button" is load-bearing: a bare <button> in a <form> submits it.
+    host.innerHTML = Array.from({ length: 24 }, (_, h) =>
+        `<button type="button" class="occ-bar" data-hour="${h}"><span class="occ-bar-fill"></span></button>`
+    ).join('');
+
+    host.addEventListener('pointerdown', occPaintStart);
+    host.addEventListener('pointermove', occPaintMove);
+    host.addEventListener('pointerleave', () => { occFocusHour = null; updateOccStats(); });
+    host.addEventListener('keydown', occBarKey);
+    // No setPointerCapture — capture retargets later events to the captured
+    // element, which is exactly what breaks painting *across* bars. Track the
+    // drag release on window instead.
+    window.addEventListener('pointerup', () => { occPainting = false; });
+    window.addEventListener('pointercancel', () => { occPainting = false; });
+}
+
+// elementFromPoint rather than event.target: under touch, events stay pinned to
+// the element the gesture started on, so delegation alone can't paint a drag.
+function occPaintAt(clientX, clientY) {
+    const bar = document.elementFromPoint(clientX, clientY)?.closest('.occ-bar');
+    if (!bar) return;
+    const r = bar.getBoundingClientRect();
+    occHours[+bar.dataset.hour] = occClamp((1 - (clientY - r.top) / r.height) * OCC_MAX);
+    occFocusHour = +bar.dataset.hour;
+    renderOccChart();
+}
+
+function occPaintStart(e) {
+    if (!occEnabled()) return;
+    occPainting = true;
+    occPaintAt(e.clientX, e.clientY);
+    e.preventDefault();   // no text selection, no touch scroll mid-drag
+}
+
+function occPaintMove(e) {
+    if (!occEnabled()) return;
+    if (occPainting) { occPaintAt(e.clientX, e.clientY); return; }
+    const bar = e.target.closest('.occ-bar');
+    const h = bar ? +bar.dataset.hour : null;
+    if (h !== occFocusHour) { occFocusHour = h; updateOccStats(); }
+}
+
+function occBarKey(e) {
+    const bar = e.target.closest('.occ-bar');
+    if (!bar) return;
+    const d = e.key === 'ArrowUp' ? OCC_STEP : e.key === 'ArrowDown' ? -OCC_STEP : 0;
+    if (!d) return;
+    e.preventDefault();
+    const h = +bar.dataset.hour;
+    occHours[h] = occClamp(occHours[h] + d);
+    occFocusHour = h;
+    renderOccChart();
+}
+
+function renderOccChart() {
+    const wd = occPreviewDay;
+    const meanDur = occMeanDuration();
+    const nowHour = state.serverClock ? state.serverClock.hour : null;
+
+    document.getElementById('occ-hour-chart').querySelectorAll('.occ-bar').forEach(bar => {
+        const h = +bar.dataset.hour;
+        const v = occHours[h];
+        const height = `${(v / OCC_MAX) * 100}%`;
+        const fill = bar.firstElementChild;
+        if (fill.style.height !== height) fill.style.height = height;
+        bar.classList.toggle('is-zero', v === 0);
+        bar.classList.toggle('is-clamped', occRawP(h, wd) > 1.0);
+        bar.classList.toggle('is-now', h === nowHour);
+        // Guarded like setText — this runs on every pointermove during a drag.
+        const title = `${String(h).padStart(2, '0')}:00 — ×${v.toFixed(1)} → `
+            + `${occVehPerHour(occEffectiveP(h, wd), meanDur).toFixed(0)} veh/hr`;
+        if (bar.title !== title) bar.title = title;
+    });
+
+    const raw = document.getElementById('rpm-occ-hours-raw');
+    const serialised = occHours.map(v => v.toFixed(1)).join(',');
+    if (document.activeElement !== raw && raw.value !== serialised) raw.value = serialised;
+
+    renderOccDayRow();
+    updateOccStats();
+}
+
+function renderOccDayRow() {
+    const host = document.getElementById('occ-day-row');
+    if (!host.childElementCount) {
+        host.innerHTML = OCC_DAYS.map((d, i) => `
+            <label class="occ-day" data-day="${i}"><span>${escHtml(d)}</span>
+                <input type="number" data-day="${i}" step="0.1" min="0" max="${OCC_MAX}">
+            </label>`).join('');
+        host.addEventListener('input', e => {
+            const el = e.target.closest('input[data-day]');
+            if (!el) return;
+            occDays[+el.dataset.day] = occClamp(parseFloat(el.value) || 0);
+            renderOccChart();
+        });
+        // Focusing a day switches which weekday the readout describes.
+        host.addEventListener('focusin', e => {
+            const el = e.target.closest('input[data-day]');
+            if (el) { occPreviewDay = +el.dataset.day; renderOccChart(); }
+        });
+    }
+    host.querySelectorAll('input[data-day]').forEach(el => {
+        // Never rewrite the focused input's value — it resets the caret mid-type.
+        if (document.activeElement !== el) el.value = occDays[+el.dataset.day].toFixed(1);
+    });
+    host.querySelectorAll('label[data-day]').forEach(el => {
+        el.classList.toggle('is-preview', +el.dataset.day === occPreviewDay);
+    });
+}
+
+function updateOccStats() {
+    const el = document.getElementById('occ-sched-stats');
+    const wd = occPreviewDay;
+    const meanDur = occMeanDuration();
+    const tz = state.serverClock ? ` ${state.serverClock.timezone}` : '';
+
+    if (!occEnabled()) {
+        const r = occVehPerHour(Math.min(1, occBaseP()), meanDur);
+        el.textContent = `Flat — ${r.toFixed(0)} veh/hr · ~${Math.round(r * 24).toLocaleString()} veh/day`;
+        return;
+    }
+    if (occFocusHour !== null) {
+        const h = occFocusHour;
+        const p = occEffectiveP(h, wd);
+        el.textContent = `${String(h).padStart(2, '0')}:00${tz} ${OCC_DAYS[wd]} — `
+            + `×${occHours[h].toFixed(1)} · p=${p.toFixed(3)} · ${occVehPerHour(p, meanDur).toFixed(0)} veh/hr`
+            + (occRawP(h, wd) > 1.0 ? ' — clamped at p=1.0' : '');
+        return;
+    }
+    const rates = occHours.map((_, h) => occVehPerHour(occEffectiveP(h, wd), meanDur));
+    const total = Math.round(rates.reduce((a, b) => a + b, 0));
+    const clamped = occHours.some((_, h) => occRawP(h, wd) > 1.0);
+    el.textContent = `${OCC_DAYS[wd]}: ~${total.toLocaleString()} veh/day · `
+        + `peak ${Math.max(...rates).toFixed(0)} veh/hr`
+        + (clamped ? ' · some hours clamped at p=1.0' : '');
+}
+
+function loadOccupancySchedule(cfg) {
+    const ok = (a, n) => Array.isArray(a) && a.length === n;
+    document.getElementById('rpm-occupancy_schedule_enabled').checked =
+        !!(cfg && cfg.occupancy_schedule_enabled);
+    occHours = ok(cfg && cfg.occupancy_hour_factors, 24)
+        ? cfg.occupancy_hour_factors.map(occClamp) : new Array(24).fill(1);
+    occDays = ok(cfg && cfg.occupancy_day_factors, 7)
+        ? cfg.occupancy_day_factors.map(occClamp) : new Array(7).fill(1);
+    occFocusHour = null;
+    // Server weekday if we have it, else convert the browser's (JS 0=Sun -> 0=Mon).
+    occPreviewDay = state.serverClock ? state.serverClock.wday : (new Date().getDay() + 6) % 7;
+    buildOccChart();
+    syncOccEnabled();
+    renderOccChart();
+}
+
+function resetOccupancySchedule() {
+    occHours = new Array(24).fill(1);
+    occDays = new Array(7).fill(1);
+    document.querySelectorAll('#occ-presets .chip').forEach(c => c.classList.remove('active'));
+    renderOccChart();
+}
+
+function syncOccEnabled() {
+    document.getElementById('occ-sched-body').classList.toggle('is-disabled', !occEnabled());
+}
+
+document.getElementById('rpm-occupancy_schedule_enabled').addEventListener('change', () => {
+    syncOccEnabled();
+    renderOccChart();
+});
+document.getElementById('rpm-occupancy_frequency').addEventListener('input', renderOccChart);
+document.getElementById('rpm-occupancy_duration_range').addEventListener('input', updateOccStats);
+
+document.getElementById('occ-presets').addEventListener('click', e => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    const key = chip.dataset.preset;
+    occHours = OCC_PRESETS[key].slice();
+    occDays = OCC_PRESET_DAYS[key].slice();
+    document.querySelectorAll('#occ-presets .chip').forEach(c => c.classList.toggle('active', c === chip));
+    // Picking a preset implies you want the profile on.
+    if (!occEnabled()) {
+        document.getElementById('rpm-occupancy_schedule_enabled').checked = true;
+        syncOccEnabled();
+    }
+    renderOccChart();
+});
+
+// The text field is the escape hatch the chart can't be: exact values, copy a
+// profile between lanes, paste one from a spreadsheet. Same "min,max" precedent
+// as the Occupancy Duration input above it.
+document.getElementById('rpm-occ-hours-raw').addEventListener('change', e => {
+    const parts = e.target.value.split(',').map(s => parseFloat(s.trim()));
+    if (parts.length !== 24 || parts.some(isNaN)) {
+        alert(`Enter exactly 24 comma-separated numbers between 0 and ${OCC_MAX}.`);
+        renderOccChart();   // rewrite the canonical value back
+        return;
+    }
+    occHours = parts.map(occClamp);
+    renderOccChart();
+});
+
+// Advanced Settings is collapsed by default, and a native validation failure on
+// an input inside it blocks submit with a bubble the browser can't show. Pop it
+// open instead — same fix the mobile form already has.
+document.getElementById('rpm-form').addEventListener('invalid', () => {
+    document.querySelector('#rpm-modal details.advanced').open = true;
+}, true);
 
 // ── Mobile detector modal + Leaflet route editor ─────────────────────────────
 
@@ -1532,10 +1842,14 @@ async function init() {
     setupFilterChips();
     setupGridDelegation();
 
-    await Promise.all([fetchCameras(), fetchRPMs(), fetchMobiles(), fetchFiles(), fetchIsotopes()]);
+    await Promise.all([fetchCameras(), fetchRPMs(), fetchMobiles(), fetchFiles(),
+                       fetchIsotopes(), fetchServerClock()]);
     await Promise.all([fetchRPMStatuses(), fetchMobileStatuses()]);
 
     setInterval(fetchCameras, 5000);
+    // Refreshed so the schedule editor's "current hour" marker follows the
+    // clock across hour boundaries and DST without a page reload.
+    setInterval(fetchServerClock, 60000);
     setInterval(async () => {
         await fetchRPMs();
         await fetchRPMStatuses();

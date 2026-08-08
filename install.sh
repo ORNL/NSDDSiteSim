@@ -5,6 +5,8 @@ INSTALL_DIR="/opt/lanesim"
 SERVICE_NAME="lanesim"
 SERVICE_USER="lanesim"
 MEDIAMTX_VERSION="v1.9.0"
+# Timezone the service runs in — drives RPM traffic-profile hours and weekdays.
+SITE_TZ="${SITE_TZ:-America/New_York}"
 
 echo "=== Lane Simulator Install ==="
 
@@ -60,6 +62,10 @@ After=network.target
 Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${INSTALL_DIR}
+# RPM traffic profiles are keyed to wall-clock hour and weekday, so the service
+# needs the site's local time rather than the host's (this box runs Etc/UTC).
+# Override with SITE_TZ=... when installing at a site in another timezone.
+Environment=TZ=${SITE_TZ}
 ExecStart=${INSTALL_DIR}/venv/bin/python3 ${INSTALL_DIR}/main.py
 Restart=on-failure
 RestartSec=5

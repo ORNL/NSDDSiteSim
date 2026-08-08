@@ -86,4 +86,8 @@ class RPMServer:
             "gl_fault": sim.gl_fault,
             "nh_fault": sim.nh_fault,
             "tamper_fault": sim.tamper_fault,
+            # Read fresh rather than cached from update(): the arrival roll only
+            # runs while IDLE, so a cached value would go stale across an hour
+            # boundary during a long occupancy.
+            "occupancy_frequency_effective": round(sim.effective_occupancy_frequency(), 4),
         }

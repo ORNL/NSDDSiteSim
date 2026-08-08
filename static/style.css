@@ -1060,3 +1060,160 @@ details.advanced .advanced-body {
 .wp-icon .wp-dot:hover {
     background: var(--danger);
 }
+
+/* ── RPM traffic profile (occupancy schedule editor) ────────────────────────── */
+
+/* Wider than the 500px default so 24 hour-bars stay a usable drag target —
+   the same width the mobile modal uses for its map. */
+.rpm-modal {
+    max-width: 720px;
+}
+
+/* .btn-link is authored against --mobile-primary; retint it in this modal. */
+.rpm-modal .btn-link {
+    color: var(--rpm-primary);
+}
+
+.rpm-modal .btn-link:hover {
+    color: var(--rpm-secondary);
+}
+
+.occ-sched-body {
+    margin-top: 0.85rem;
+    transition: opacity 0.2s ease;
+}
+
+/* Unchecked: the editor stays visible (so you can see what's configured)
+   but is dimmed and inert. */
+.occ-sched-body.is-disabled {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+.occ-presets {
+    width: fit-content;
+    margin-bottom: 0.75rem;
+}
+
+.occ-presets .chip.active {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--rpm-primary);
+}
+
+.occ-chart {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 2px;
+    height: 120px;
+    padding: 0.4rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    cursor: crosshair;
+    /* A paint drag must not scroll the modal on a touch device. */
+    touch-action: none;
+}
+
+.occ-bar {
+    display: flex;
+    align-items: flex-end;
+    padding: 0;
+    border: none;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    cursor: crosshair;
+    min-width: 0;
+}
+
+.occ-bar:hover {
+    background: rgba(255, 255, 255, 0.09);
+}
+
+.occ-bar:focus-visible {
+    outline: 2px solid var(--rpm-primary);
+    outline-offset: 1px;
+}
+
+/* The hour the service clock is currently in. */
+.occ-bar.is-now {
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.5);
+}
+
+.occ-bar-fill {
+    width: 100%;
+    border-radius: 3px;
+    background: linear-gradient(180deg, var(--rpm-primary), var(--rpm-secondary));
+    pointer-events: none;
+    transition: height 0.08s linear;
+}
+
+/* Zero = lane closed; grey rather than amber so it reads as "off", with a
+   sliver left visible so the bar is still a drag target. */
+.occ-bar.is-zero .occ-bar-fill {
+    background: rgba(148, 163, 184, 0.35);
+    min-height: 2px;
+}
+
+/* The arrival roll saturates at p=1.0, so anything above it is a no-op.
+   Flagged in red or users keep raising the multiplier and see no change. */
+.occ-bar.is-clamped .occ-bar-fill {
+    background: linear-gradient(180deg, var(--danger), var(--rpm-secondary));
+}
+
+.occ-hour-axis {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.3rem 0.4rem 0;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.occ-sub-label {
+    margin-top: 1rem;
+}
+
+.occ-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.4rem;
+}
+
+.occ-day {
+    display: block;
+    margin: 0;
+    text-align: center;
+}
+
+.occ-day > span {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.25rem;
+}
+
+/* The weekday the stats footer is reporting on. */
+.occ-day.is-preview > span {
+    color: var(--rpm-primary);
+    font-weight: 700;
+}
+
+.occ-day input {
+    padding: 0.45rem 0.3rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+#rpm-occ-hours-raw {
+    font-family: monospace;
+    font-size: 0.75rem;
+}
+
+#occ-sched-stats {
+    font-variant-numeric: tabular-nums;
+}
+
+.card-rate {
+    font-variant-numeric: tabular-nums;
+}

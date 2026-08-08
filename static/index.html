@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NSDD Site Simulator</title>
-    <link rel="stylesheet" href="style.css?v=20260712b">
+    <link rel="stylesheet" href="style.css?v=20260808a">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -234,6 +234,41 @@
                             </div>
                         </div>
 
+                        <div class="form-group occ-sched">
+                            <label>Traffic Profile</label>
+                            <div class="checkbox-row">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="rpm-occupancy_schedule_enabled">
+                                    Vary occupancy by time of day &amp; day of week
+                                </label>
+                            </div>
+
+                            <div class="occ-sched-body" id="occ-sched-body">
+                                <div class="filter-chips occ-presets" id="occ-presets">
+                                    <button type="button" class="chip" data-preset="flat">Flat</button>
+                                    <button type="button" class="chip" data-preset="commuter">Commuter</button>
+                                    <button type="button" class="chip" data-preset="business">Business hours</button>
+                                    <button type="button" class="chip" data-preset="port">24/7 port</button>
+                                </div>
+
+                                <div class="occ-chart" id="occ-hour-chart"></div>
+                                <div class="occ-hour-axis" aria-hidden="true">
+                                    <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+                                </div>
+
+                                <div class="route-stats-row">
+                                    <span id="occ-sched-stats">&mdash;</span>
+                                    <button type="button" class="btn-link" onclick="resetOccupancySchedule()">Reset to flat</button>
+                                </div>
+
+                                <label class="occ-sub-label">Day of Week <span class="route-hint">— multiplier for the whole day</span></label>
+                                <div class="occ-days" id="occ-day-row"></div>
+
+                                <label class="occ-sub-label">Hourly values <span class="route-hint">— 24 numbers, comma-separated; edit here or drag the bars</span></label>
+                                <input type="text" id="rpm-occ-hours-raw" spellcheck="false">
+                            </div>
+                        </div>
+
                         <div class="grid-2">
                             <div class="form-group">
                                 <label>Gamma Alarm Probability</label>
@@ -401,6 +436,6 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="app.js?v=20260712b"></script>
+    <script src="app.js?v=20260808a"></script>
 </body>
 </html>

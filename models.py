@@ -4,6 +4,23 @@ from pydantic import BaseModel, field_validator, model_validator
 from typing import List, Literal, Optional, Tuple
 
 
+# Occupancy schedule factors are capped well below the point where they stop
+# mattering: the arrival roll saturates at p=1.0, so a factor big enough to push
+# occupancy_frequency past 1.0 is silently a no-op.
+OCC_FACTOR_MAX = 3.0
+
+
+def _check_occ_factors(v, n, name):
+    if len(v) != n:
+        raise ValueError(f"{name} must have exactly {n} entries (got {len(v)})")
+    for f in v:
+        if not math.isfinite(f):
+            raise ValueError(f"{name} entries must be finite numbers")
+        if not (0.0 <= f <= OCC_FACTOR_MAX):
+            raise ValueError(f"{name} entries must be between 0.0 and {OCC_FACTOR_MAX}")
+    return [float(f) for f in v]
+
+
 class CameraConfig(BaseModel):
     name: str
     video_file: str
@@ -30,6 +47,16 @@ class RPMConfig(BaseModel):
     neutron_n_sigma: float = 7.0
     occupancy_frequency: float = 0.1
     occupancy_duration_range: Tuple[int, int] = (6, 10)
+
+    # Optional traffic profile, multiplicative on occupancy_frequency:
+    #   p_effective = clamp(occupancy_frequency * hour[tm_hour] * day[tm_wday], 0, 1)
+    # Disabled -> occupancy_frequency is used verbatim, i.e. pre-schedule
+    # behaviour. Defaults keep existing rpms.json files loadable without
+    # migration, same as the CSV metadata block below.
+    occupancy_schedule_enabled: bool = False
+    occupancy_hour_factors: List[float] = [1.0] * 24  # index = local hour 0-23
+    occupancy_day_factors: List[float] = [1.0] * 7    # index 0=Mon .. 6=Sun (tm_wday)
+
     gamma_alarm_probability: float = 0.05
     neutron_alarm_probability: float = 0.01
     unique_alarm_probability: float = 0.0
@@ -49,6 +76,16 @@ class RPMConfig(BaseModel):
     eml_collimated: bool = False
     lane_width: float = 4.7
     camera_ids: List[str] = []
+
+    @field_validator("occupancy_hour_factors")
+    @classmethod
+    def _hour_factors_sane(cls, v):
+        return _check_occ_factors(v, 24, "occupancy_hour_factors")
+
+    @field_validator("occupancy_day_factors")
+    @classmethod
+    def _day_factors_sane(cls, v):
+        return _check_occ_factors(v, 7, "occupancy_day_factors")
 
 
 class RPMResponse(BaseModel):
@@ -193,3 +230,7 @@ class RPMStatus(BaseModel):
     gl_fault: bool = False
     nh_fault: bool = False
     tamper_fault: bool = False
+    # Schedule-adjusted arrival probability for the current 5s cycle. Equals
+    # occupancy_frequency when no traffic profile is configured. Lets the UI
+    # show the profile working without waiting for an hour boundary.
+    occupancy_frequency_effective: float = 0.0

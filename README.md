@@ -199,6 +199,7 @@ Supported formats: `.mp4`, `.mkv`, `.avi`
 | Neutron Alarm σ | 7.0 | Standard deviations above background to trigger a neutron alarm |
 | Occupancy Frequency | 0.1 | Probability (0–1) of a vehicle occupancy starting each 5-second cycle |
 | Occupancy Duration | 6,10 | Random vehicle transit time range in seconds (min,max) |
+| Traffic Profile | off | Optional per-hour / per-weekday multipliers on Occupancy Frequency (see below) |
 | Gamma Alarm Probability | 0.05 | Probability (0–1) that an occupancy contains a gamma alarm source |
 | Neutron Alarm Probability | 0.01 | Probability (0–1) that an occupancy contains a neutron alarm source |
 | Unique Alarm Probability | 0.0 | Probability (0–1) that an alarm uses spatially-unique source geometry |
@@ -206,6 +207,29 @@ Supported formats: `.mp4`, `.mkv`, `.avi`
 4. Click **Start RPM**.
 
 The RPM card shows the current **state** (IDLE / OCCUPIED), **connected clients**, and running **occupancy count**. State and alarm badges refresh every 3 seconds.
+
+### Traffic Profiles (time of day / day of week)
+
+By default a lane produces the same traffic at 3 a.m. on a Sunday as at 8 a.m. on a Tuesday. Tick **Vary occupancy by time of day & day of week** under Advanced Settings to shape it:
+
+- **Hourly bars** — drag across the 24-bar chart to set a multiplier (0–3×) per hour, or type the values into the comma-separated field below it. The field is the easy way to copy a profile from one lane to another. Arrow keys nudge a focused bar.
+- **Day of week** — a multiplier applied to the whole day, Mon…Sun.
+- **Presets** — Flat, Commuter, Business hours and 24/7 port set both rows at once.
+
+The effective arrival probability each 5-second cycle is:
+
+```
+p = clamp(Occupancy Frequency × hour_factor × day_factor, 0.0, 1.0)
+```
+
+Points worth knowing:
+
+- **`p` saturates at 1.0.** A base of 0.4 with a 3× peak clamps to 1.0, and pushing the multiplier higher does nothing. Bars in that state turn red and the readout says so.
+- **The practical ceiling is ~277 vehicles/hour**, not 720. A full arrival cycle is `5/p` seconds of rolls *plus* one transit, because the simulator only rolls for a new vehicle while IDLE. The editor's veh/hr readout uses `3600 / (5/p + mean_duration)`.
+- **A factor of 0 means the lane is closed** — background GB/NB still flows, but no occupancies start.
+- **Manual γ/n triggers ignore the profile**, so the trigger buttons still work during a zeroed hour.
+- **Hours follow the service's clock**, set by `Environment=TZ=` in the systemd unit (default `America/New_York`; override at install time with `SITE_TZ=...`). The editor labels the readout with the live server timezone and outlines the current hour. `GET /api/rpms/clock` reports it.
+- The profile is stored per lane in `data/rpms.json`. Lanes saved before this feature load with it disabled and flat — no migration needed.
 
 ### Stopping and Starting an RPM Monitor
 

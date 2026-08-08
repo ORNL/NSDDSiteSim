@@ -35,6 +35,9 @@ def _to_vm250_config(config: RPMConfig) -> VM250Config:
         source_pos_width=config.source_pos_width,
         source_pos_height=config.source_pos_height,
         is_distributed=config.is_distributed,
+        occupancy_schedule_enabled=config.occupancy_schedule_enabled,
+        occupancy_hour_factors=list(config.occupancy_hour_factors),
+        occupancy_day_factors=list(config.occupancy_day_factors),
     )
 
 
@@ -167,7 +170,14 @@ class RPMManager:
     async def start_all(self):
         for rpm_id in list(self.configs.keys()):
             if rpm_id not in self._stopped_ids:
-                config = RPMConfig(**self.configs[rpm_id])
+                # Validate per-RPM: an unparseable entry (hand-edited rpms.json,
+                # out-of-range traffic-profile factors) must not abort the whole
+                # restore loop and leave every other lane down.
+                try:
+                    config = RPMConfig(**self.configs[rpm_id])
+                except Exception as e:
+                    logger.error(f"Skipping RPM {rpm_id} — invalid config: {e}")
+                    continue
                 ok, msg = await self.add_rpm(rpm_id, config)
                 if not ok:
                     logger.error(f"Failed to restore RPM {rpm_id}: {msg}")

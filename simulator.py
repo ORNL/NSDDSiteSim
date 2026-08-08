@@ -24,6 +24,11 @@ class VM250Config:
     source_pos_width: float = None
     source_pos_height: float = None
     is_distributed: bool = None
+    # Traffic profile (see RPMConfig). None or a wrong-length list is treated as
+    # flat, so a config built directly without these behaves exactly as before.
+    occupancy_schedule_enabled: bool = False
+    occupancy_hour_factors: Optional[List[float]] = None  # 24 entries, local hour
+    occupancy_day_factors: Optional[List[float]] = None   # 7 entries, 0=Mon (tm_wday)
 
 class VM250Simulator:
     def __init__(self, rpm_id: int, config: VM250Config):
@@ -64,9 +69,19 @@ class VM250Simulator:
         now = time.localtime()
         seconds_since_midnight = now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec
         
-        # Estimate occupancy count based on frequency (checked every 5s)
-        bg_cycles = seconds_since_midnight // 5
-        self.occupancy_count = int(bg_cycles * config.occupancy_frequency) % 1000000
+        # Estimate occupancy count based on frequency (checked every 5s). With a
+        # traffic profile we integrate across the hours of today already elapsed
+        # — a flat sum would credit rush-hour volume to the small hours. The
+        # unscheduled branch is left exactly as it was.
+        if not config.occupancy_schedule_enabled:
+            bg_cycles = seconds_since_midnight // 5
+            self.occupancy_count = int(bg_cycles * config.occupancy_frequency) % 1000000
+        else:
+            expected = 0.0
+            for hour in range(now.tm_hour + 1):
+                secs = 3600 if hour < now.tm_hour else (now.tm_min * 60 + now.tm_sec)
+                expected += (secs / 5.0) * self._effective_frequency(hour, now.tm_wday)
+            self.occupancy_count = int(expected) % 1000000
         
         # Estimate cumulative neutron pulses
         self.neutron_cumulative = int(seconds_since_midnight * config.nominal_neutron_bg) % 1000000
@@ -151,6 +166,32 @@ class VM250Simulator:
             
         return [self._poisson_sample(m) for m in means]
 
+    def _effective_frequency(self, hour: int, wday: int) -> float:
+        """Per-5s occupancy roll probability at a local wall-clock hour/weekday.
+
+        Schedule off — or factor lists that are missing or the wrong length —
+        returns the flat configured value, reproducing pre-schedule behaviour.
+        The roll is `random.random() < p` and random() is [0.0, 1.0), so p<=0
+        never fires and p>=1.0 always does; clamping here just keeps the number
+        the status endpoint reports honest.
+        """
+        cfg = self.config
+        if not cfg.occupancy_schedule_enabled:
+            return cfg.occupancy_frequency
+        p = cfg.occupancy_frequency
+        hours = cfg.occupancy_hour_factors
+        days = cfg.occupancy_day_factors
+        if hours and len(hours) == 24:
+            p *= hours[hour]
+        if days and len(days) == 7:
+            p *= days[wday]
+        return min(1.0, max(0.0, p))
+
+    def effective_occupancy_frequency(self) -> float:
+        """The probability in force right now — for the status endpoint."""
+        lt = time.localtime()
+        return self._effective_frequency(lt.tm_hour, lt.tm_wday)
+
     def update(self) -> List[str]:
         """Updates the state machine and returns a list of messages to send."""
         now = time.time()
@@ -184,8 +225,10 @@ class VM250Simulator:
             # If we just sent a GX, we might want to wait at least one cycle, 
             # but usually occupancy checks happen at BG pulse intervals.
             if now - self.last_bg_pulse >= 5.0:
-                # We only roll for new occupancy during the 5s window
-                if random.random() < self.config.occupancy_frequency:
+                # We only roll for new occupancy during the 5s window. The
+                # traffic-profile lookup reuses local_now from the top of
+                # update(), so no second localtime() call in the hot path.
+                if random.random() < self._effective_frequency(local_now.tm_hour, local_now.tm_wday):
                     self.state = "OCCUPIED"
                     self.occupancy_count = (self.occupancy_count + 1) % 1000000
                     duration = random.randint(*self.config.occupancy_duration_range)
