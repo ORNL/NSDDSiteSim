@@ -1,0 +1,15 @@
+
+services:
+  lanesim:
+    build: .
+    ports:
+      - "8000:8000"
+      - "9001-9050:9001-9050"
+      - "10001-10050:10001-10050"
+    volumes:
+      - ./data:/opt/lanesim/data
+      - ./logs:/opt/lanesim/logs
+      - ./videos:/opt/lanesim/videos
+    environment:
+      - SITE_TZ=America/New_York
+    restart: unless-stopped
