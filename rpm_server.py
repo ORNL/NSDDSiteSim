@@ -42,8 +42,14 @@ class RPMServer:
     async def handle_client(self, reader, writer):
         addr = writer.get_extra_info('peername')
         logger.info(f"RPM {self.rpm_id}: client connected from {addr}")
-        self.clients.add(writer)
         try:
+            # TT/TC are otherwise transition-only messages. Publish the
+            # simulator's actual state when a client connects so a fresh or
+            # reconnected OSCAR instance does not remain Tamper: Unknown until
+            # somebody manually toggles the fault.
+            writer.write(self.simulator.tamper_status_message().encode('ascii'))
+            await writer.drain()
+            self.clients.add(writer)
             while True:
                 data = await reader.read(1024)
                 if not data:

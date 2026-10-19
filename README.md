@@ -250,7 +250,7 @@ Running RPM cards have two alarm trigger buttons:
 | Gamma alarm | **γ** (orange) | Immediately starts an alarming occupancy with a gamma source |
 | Neutron alarm | **n** (purple) | Immediately starts an alarming occupancy with a neutron source |
 
-Clicking either button forces the RPM into OCCUPIED state with the corresponding alarm flag set, generating the appropriate `GA`/`NA` scan messages. If the RPM is already in an occupancy, the alarm flag is added to the current transit. The occupancy runs for a randomised duration drawn from the configured **Occupancy Duration** range and then returns to IDLE automatically.
+Clicking either button forces the RPM into OCCUPIED state and immediately latches the corresponding alarm, generating the appropriate `GA`/`NA` scan message on the next simulator update. This deterministic control behavior also applies to a one-second occupancy; it does not depend on the random count sample crossing the configured threshold. If the RPM is already in an occupancy, the alarm is added to the current transit and its scan timer is primed. Natural, non-manual alarm simulation continues to use the configured count thresholds. The occupancy runs for a randomised duration drawn from the configured **Occupancy Duration** range and then returns to IDLE automatically.
 
 ### Removing an RPM Monitor
 
@@ -279,8 +279,16 @@ Each line is terminated with `\r\n`.
 | `NS` | OCCUPIED (every 1s) | `NS,ddd,ddd,ddd,ddd` | Neutron scan, no alarm |
 | `NA` | OCCUPIED (every 1s) | `NA,ddd,ddd,ddd,ddd` | Neutron scan, alarm latched |
 | `GX` | End of occupancy | `GX,NNNNNN,NNNNNN,000000,000000` | Occupancy summary (ID count, neutron cumulative) |
+| `TT` | Tamper asserted and on client connect while active | `TT,000000,000000,000000,000000` | Tamper/power-fail state is active |
+| `TC` | Tamper cleared and on client connect while clear | `TC,111111,111111,111111,111111` | Tamper/power-fail state is clear |
 
 The four data fields represent the four detector channels: **Driver Bottom**, **Driver Top**, **Passenger Bottom**, **Passenger Top**.
+
+Each new TCP client receives exactly one `TT` or `TC` baseline before the
+normal detector stream. This lets consumers distinguish a known-clear RPM from
+one whose tamper state has never been observed. The baseline always reflects
+the simulator's current modeled state; reconnecting while tamper is active does
+not falsely clear it.
 
 ---
 

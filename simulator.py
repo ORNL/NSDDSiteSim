@@ -31,6 +31,9 @@ class VM250Config:
     occupancy_day_factors: Optional[List[float]] = None   # 7 entries, 0=Mon (tm_wday)
 
 class VM250Simulator:
+    TAMPER_ACTIVE_MESSAGE = "TT,000000,000000,000000,000000\r\n"
+    TAMPER_CLEAR_MESSAGE = "TC,111111,111111,111111,111111\r\n"
+
     def __init__(self, rpm_id: int, config: VM250Config):
         self.rpm_id = rpm_id
         self.config = config
@@ -335,13 +338,24 @@ class VM250Simulator:
         return messages
 
     def trigger_alarm(self, gamma: bool = False, neutron: bool = False):
-        """Force an immediate alarming occupancy on the next update cycle."""
+        """Force an immediate, deterministically latched alarming occupancy.
+
+        A manual trigger is a test/control action rather than a request to roll
+        the statistical alarm model.  Latch each requested alarm immediately
+        and prime its scan timer so even a one-second occupancy emits GA/NA on
+        the next update.  Natural occupancies still cross their configured
+        count threshold before latching.
+        """
         now = time.time()
         if self.state == "OCCUPIED":
             if gamma:
                 self.is_gamma_alarm = True
+                self.gamma_alarm_latched = True
+                self.last_gamma_scan_pulse = now - 0.2
             if neutron:
                 self.is_neutron_alarm = True
+                self.neutron_alarm_latched = True
+                self.last_neutron_scan_pulse = now - 1.0
         else:
             self.state = "OCCUPIED"
             self.occupancy_count = (self.occupancy_count + 1) % 1000000
@@ -350,8 +364,8 @@ class VM250Simulator:
             self.occupancy_end_time = now + duration
             self.is_gamma_alarm = gamma
             self.is_neutron_alarm = neutron
-            self.gamma_alarm_latched = False
-            self.neutron_alarm_latched = False
+            self.gamma_alarm_latched = gamma
+            self.neutron_alarm_latched = neutron
             self.occ_is_unique = False
             self.occ_is_distributed = False
             self.occ_source_sigma = self.config.point_source_sigma
@@ -379,9 +393,9 @@ class VM250Simulator:
             self.nh_fault = active
         elif fault_type == "tamper":
             if active and not self.tamper_fault:
-                self._pending_tamper_msg = "TT,000000,000000,000000,000000\r\n"
+                self._pending_tamper_msg = self.TAMPER_ACTIVE_MESSAGE
             elif not active and self.tamper_fault:
-                self._pending_tamper_msg = "TC,111111,111111,111111,111111\r\n"
+                self._pending_tamper_msg = self.TAMPER_CLEAR_MESSAGE
             self.tamper_fault = active
         else:
             raise ValueError(f"Unknown fault type: {fault_type!r}")
@@ -391,3 +405,12 @@ class VM250Simulator:
         # keeps them out of conflict either way).
         if fault_type in ("gh", "gl", "nh") and active:
             self.last_fault_pulse = now - 5.0
+
+    def tamper_status_message(self) -> str:
+        """Return the current modeled tamper state for a newly connected RPM client.
+
+        TT/TC normally describe transitions. Sending the current state once at
+        connection time gives a reconnecting consumer a safe baseline without
+        inventing a clear state: an active modeled tamper remains TT.
+        """
+        return self.TAMPER_ACTIVE_MESSAGE if self.tamper_fault else self.TAMPER_CLEAR_MESSAGE
