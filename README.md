@@ -68,7 +68,57 @@ For a dedicated test bench with 4–8 camera streams and 10–20 RPM monitors, a
 
 ## Installation
 
-### 1. Transfer files to the LXC container
+### RPM-only systemd deployment (ARM64 or x86-64)
+
+For an OSCAR regression host that does not emulate cameras, use the RPM-only
+installer. It avoids the camera installer's fixed x86-64 MediaMTX download,
+creates 50 running RPMs on ports `10001` through `10050`, enables recovery after
+host or process restart, and installs the resource policy validated on the
+50-lane Raspberry Pi test system.
+
+```bash
+sudo bash scripts/install-rpm-only-systemd.sh
+```
+
+The default service policy is:
+
+- `Restart=always` with a five-second delay and bounded restart rate;
+- 512 MiB memory pressure threshold and 768 MiB hard limit;
+- 256-task and 4,096-file-descriptor limits;
+- a non-login `lanesim` service account, restrictive umask, read-only application
+  code, private temporary storage, and writable access only to simulator state,
+  logs, and videos;
+- a post-start API check requiring all 50 RPMs to be running on the exact port
+  range before installation succeeds.
+
+The installer is configurable without editing it:
+
+```bash
+sudo env \
+  RPM_COUNT=50 \
+  RPM_BASE_PORT=10001 \
+  SITE_TZ=America/New_York \
+  MEMORY_HIGH=512M \
+  MEMORY_MAX=768M \
+  TASKS_MAX=256 \
+  bash scripts/install-rpm-only-systemd.sh
+```
+
+It refuses to overwrite an existing `/opt/lanesim`. After reviewing the target,
+set `ALLOW_EXISTING_INSTALL=1`; the existing tree is first copied to a timestamped
+`/opt/lanesim.pre-rpm-only.*` backup. Existing RPM configuration is preserved
+only when it already describes the requested running fixture. To deliberately
+replace it, also set `REPLACE_RPM_CONFIG=1`. These acknowledgements do not replace
+the need to preserve any test state that matters.
+
+This installer changes only the application host. Firewall rules, DNS, OSCAR
+lane configuration, and authorization to expose the management API remain the
+operator's responsibility. The web UI listens on port `8000`, and the generated
+RPM listeners use the selected contiguous TCP range.
+
+### Combined camera and RPM deployment
+
+#### 1. Transfer files to the LXC container
 
 Copy the entire `unified/` directory to the container. The installer uses its own location as the source, so the directory name does not matter.
 
@@ -76,7 +126,7 @@ Copy the entire `unified/` directory to the container. The installer uses its ow
 scp -r unified/ root@<container-ip>:/tmp/lanesim
 ```
 
-### 2. Add video files (optional)
+#### 2. Add video files (optional)
 
 Video files can be uploaded at any time through the web UI after installation (see [Video Library](#video-library)). If you want files available immediately on first boot, copy them into the `videos/` subdirectory before running the installer and they will be copied automatically.
 
@@ -86,7 +136,7 @@ cp /path/to/your/*.mp4 /tmp/lanesim/videos/
 
 Three sample videos are included in the repository if you need them.
 
-### 3. Run the installer
+#### 3. Run the installer
 
 ```bash
 cd /tmp/lanesim
@@ -102,7 +152,7 @@ The installer will:
 5. Create a Python virtual environment and install dependencies
 6. Register and enable the `lanesim` systemd service
 
-### 4. Start the service
+#### 4. Start the service
 
 ```bash
 systemctl start lanesim
@@ -250,7 +300,7 @@ Running RPM cards have two alarm trigger buttons:
 | Gamma alarm | **γ** (orange) | Immediately starts an alarming occupancy with a gamma source |
 | Neutron alarm | **n** (purple) | Immediately starts an alarming occupancy with a neutron source |
 
-Clicking either button forces the RPM into OCCUPIED state with the corresponding alarm flag set, generating the appropriate `GA`/`NA` scan messages. If the RPM is already in an occupancy, the alarm flag is added to the current transit. The occupancy runs for a randomised duration drawn from the configured **Occupancy Duration** range and then returns to IDLE automatically.
+Clicking either button forces the RPM into OCCUPIED state and immediately latches the corresponding alarm, generating the appropriate `GA`/`NA` scan message on the next simulator update. This deterministic control behavior also applies to a one-second occupancy; it does not depend on the random count sample crossing the configured threshold. If the RPM is already in an occupancy, the alarm is added to the current transit and its scan timer is primed. Natural, non-manual alarm simulation continues to use the configured count thresholds. The occupancy runs for a randomised duration drawn from the configured **Occupancy Duration** range and then returns to IDLE automatically.
 
 ### Removing an RPM Monitor
 
@@ -279,8 +329,16 @@ Each line is terminated with `\r\n`.
 | `NS` | OCCUPIED (every 1s) | `NS,ddd,ddd,ddd,ddd` | Neutron scan, no alarm |
 | `NA` | OCCUPIED (every 1s) | `NA,ddd,ddd,ddd,ddd` | Neutron scan, alarm latched |
 | `GX` | End of occupancy | `GX,NNNNNN,NNNNNN,000000,000000` | Occupancy summary (ID count, neutron cumulative) |
+| `TT` | Tamper asserted and on client connect while active | `TT,000000,000000,000000,000000` | Tamper/power-fail state is active |
+| `TC` | Tamper cleared and on client connect while clear | `TC,111111,111111,111111,111111` | Tamper/power-fail state is clear |
 
 The four data fields represent the four detector channels: **Driver Bottom**, **Driver Top**, **Passenger Bottom**, **Passenger Top**.
+
+Each new TCP client receives exactly one `TT` or `TC` baseline before the
+normal detector stream. This lets consumers distinguish a known-clear RPM from
+one whose tamper state has never been observed. The baseline always reflects
+the simulator's current modeled state; reconnecting while tamper is active does
+not falsely clear it.
 
 ---
 
