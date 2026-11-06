@@ -1,18 +1,16 @@
 name: Create Offline Release
 
 on:
-  pull_request:
-    types:
-      - closed
-    branches:
-      - main
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   release-offline-package:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,7 +29,6 @@ jobs:
           mkdir offline-package
           mv lanesim-image.tar offline-package/
 
-          # Create an offline-friendly docker-compose.yml
           cat << 'EOF' > offline-package/docker-compose.yml
           services:
             lanesim:
@@ -49,7 +46,6 @@ jobs:
               restart: unless-stopped
           EOF
 
-          # Create a helper script to load and run
           cat << 'EOF' > offline-package/start.sh
           #!/bin/bash
           echo "Loading lanesim Docker image..."
@@ -61,15 +57,18 @@ jobs:
 
           chmod +x offline-package/start.sh
 
-          # Zip the package
           cd offline-package
           zip -r ../lanesim-offline.zip .
           cd ..
 
-      - name: Generate Release Tag
+      - name: Determine Release Tag
         id: generate_tag
         run: |
-          echo "tag=v$(date +'%Y.%m.%d.%H%M%S')" >> $GITHUB_OUTPUT
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(date +'%Y.%m.%d.%H%M%S')" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

@@ -30,10 +30,11 @@ const DEFAULT_MOBILE_ROUTE = [
 // polls is what eliminates the flicker the old innerHTML-replace approach had.
 const cardCache = new Map();
 
-// Host used in user-visible URLs (RTSP cards, RPM TCP cards, CSV export). The
-// downstream loader software expects the LXC IP, not whatever DNS name the
-// admin happens to be browsing through, so this is intentionally hardcoded.
-const DEVICE_HOST = '192.0.2.94';
+// Host used in user-visible URLs (RTSP cards, RPM TCP cards, CSV export).
+// Defaults to the active browser hostname and falls back to RFC 5737 TEST-NET-1.
+const DEVICE_HOST = (typeof window !== 'undefined' && window.location && window.location.hostname)
+    ? window.location.hostname
+    : '192.0.2.94';
 
 let editingCameraId = null;
 let editingRPMId = null;
