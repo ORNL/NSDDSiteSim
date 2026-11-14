@@ -17,7 +17,14 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p $INSTALL_DIR/bin $INSTALL_DIR/data $INSTALL_DIR/logs $INSTALL_DIR/videos $INSTALL_DIR/static $INSTALL_DIR/routers && \
-    wget -q "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_amd64.tar.gz" -O /tmp/mediamtx.tar.gz && \
+    DPKG_ARCH="$(dpkg --print-architecture)" && \
+    case "$DPKG_ARCH" in \
+      amd64) MTX_ARCH="amd64" ;; \
+      arm64) MTX_ARCH="arm64v8" ;; \
+      armhf) MTX_ARCH="armv7" ;; \
+      *) echo "Unsupported architecture: $DPKG_ARCH" >&2; exit 1 ;; \
+    esac && \
+    wget -q "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz" -O /tmp/mediamtx.tar.gz && \
     tar -xzf /tmp/mediamtx.tar.gz -C $INSTALL_DIR/bin/ mediamtx && \
     rm /tmp/mediamtx.tar.gz && \
     chmod +x $INSTALL_DIR/bin/mediamtx

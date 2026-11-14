@@ -87,9 +87,14 @@ async def create_camera(config: CameraConfig, request: Request):
     rpm_manager = request.app.state.rpm_manager
     mobile_manager = request.app.state.mobile_manager
 
-    used = manager.get_used_ports() | rpm_manager.get_used_ports() | mobile_manager.get_used_ports()
-    if config.port in used:
+    non_camera_ports = rpm_manager.get_used_ports() | mobile_manager.get_used_ports()
+    if config.port in non_camera_ports:
         raise HTTPException(status_code=409, detail=f"Port {config.port} is already in use")
+    if (config.port, config.path.lstrip("/")) in manager.get_used_endpoints():
+        raise HTTPException(
+            status_code=409,
+            detail=f"RTSP endpoint port {config.port} path '/{config.path.lstrip('/')}' is already in use"
+        )
 
     stream_id = str(uuid.uuid4())[:8]
     loop = asyncio.get_running_loop()
@@ -134,12 +139,15 @@ def update_camera(stream_id: str, config: CameraConfig, request: Request):
     if current["running"]:
         raise HTTPException(status_code=409, detail="Stop the stream before editing")
 
-    # Port conflict check, excluding this stream's own current port
-    if config.port != current["config"]["port"]:
-        used = (manager.get_used_ports() - {current["config"]["port"]}) | rpm_manager.get_used_ports() \
-            | mobile_manager.get_used_ports()
-        if config.port in used:
-            raise HTTPException(status_code=409, detail=f"Port {config.port} is already in use")
+    # Port/path conflict check, excluding this stream's own current endpoint
+    non_camera_ports = rpm_manager.get_used_ports() | mobile_manager.get_used_ports()
+    if config.port in non_camera_ports:
+        raise HTTPException(status_code=409, detail=f"Port {config.port} is already in use")
+    if (config.port, config.path.lstrip("/")) in manager.get_used_endpoints(exclude_id=stream_id):
+        raise HTTPException(
+            status_code=409,
+            detail=f"RTSP endpoint port {config.port} path '/{config.path.lstrip('/')}' is already in use"
+        )
 
     ok, message = manager.update_stream(stream_id, config.model_dump())
     if not ok:

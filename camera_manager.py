@@ -83,9 +83,9 @@ class CameraManager:
             ])
             if framerate:
                 cmd.extend(["-g", str(int(framerate) * KEYFRAME_INTERVAL_SEC)])
-            cmd.extend(["-c:a", "aac", "-f", "rtsp"])
+            cmd.extend(["-c:a", "aac", "-rtsp_transport", "tcp", "-f", "rtsp"])
         else:
-            cmd.extend(["-c", "copy", "-f", "rtsp"])
+            cmd.extend(["-c", "copy", "-rtsp_transport", "tcp", "-f", "rtsp"])
 
         cmd.append(rtsp_url)
         return cmd
@@ -272,6 +272,13 @@ class CameraManager:
 
     def get_used_ports(self) -> set:
         return {config["port"] for config in self.all_configs.values()}
+
+    def get_used_endpoints(self, exclude_id: Optional[str] = None) -> set:
+        return {
+            (int(config.get("port", 8554)), config.get("path", sid).lstrip("/"))
+            for sid, config in self.all_configs.items()
+            if sid != exclude_id
+        }
 
     def start_all(self):
         for sid in list(self.all_configs.keys()):

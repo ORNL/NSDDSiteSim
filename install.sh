@@ -7,6 +7,7 @@ SERVICE_USER="lanesim"
 MEDIAMTX_VERSION="v1.9.0"
 # Timezone the service runs in — drives RPM traffic-profile hours and weekdays.
 SITE_TZ="${SITE_TZ:-America/New_York}"
+LANESIM_PORT="${LANESIM_PORT:-8000}"
 
 echo "=== Lane Simulator Install ==="
 
@@ -36,8 +37,15 @@ fi
 
 # 5. Download MediaMTX binary
 if [ ! -f "$INSTALL_DIR/bin/mediamtx" ]; then
-    echo "Downloading MediaMTX $MEDIAMTX_VERSION..."
-    URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_amd64.tar.gz"
+    ARCH_RAW="$(uname -m)"
+    case "$ARCH_RAW" in
+        x86_64|amd64) MTX_ARCH="amd64" ;;
+        aarch64|arm64) MTX_ARCH="arm64v8" ;;
+        armv7l|armv7*) MTX_ARCH="armv7" ;;
+        *) echo "Unsupported architecture for MediaMTX: $ARCH_RAW" >&2; exit 1 ;;
+    esac
+    echo "Downloading MediaMTX $MEDIAMTX_VERSION ($MTX_ARCH)..."
+    URL="https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_${MTX_ARCH}.tar.gz"
     wget -q "$URL" -O /tmp/mediamtx.tar.gz
     tar -xzf /tmp/mediamtx.tar.gz -C "$INSTALL_DIR/bin/" mediamtx
     rm /tmp/mediamtx.tar.gz
@@ -66,6 +74,7 @@ WorkingDirectory=${INSTALL_DIR}
 # needs the site's local time rather than the host's (this box runs Etc/UTC).
 # Override with SITE_TZ=... when installing at a site in another timezone.
 Environment=TZ=${SITE_TZ}
+Environment=LANESIM_PORT=${LANESIM_PORT}
 ExecStart=${INSTALL_DIR}/venv/bin/python3 ${INSTALL_DIR}/main.py
 Restart=on-failure
 RestartSec=5
